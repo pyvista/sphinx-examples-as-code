@@ -22,7 +22,7 @@ jobs:
       with:
         persist-credentials: false
         fetch-depth: 0
-    - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78   # v7.6.0
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9   # v9.0.0
       with:
         enable-cache: false
     - run: uv sync --group dev
@@ -43,7 +43,7 @@ jobs:
       with:
         persist-credentials: false
         fetch-depth: 0
-    - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78   # v7.6.0
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9   # v9.0.0
       with:
         enable-cache: false
     - uses: pyvista/setup-headless-display-action@5bc8de3bc71fcda7a96439571287a554901541a0   # v4.3
@@ -65,7 +65,7 @@ jobs:
       with:
         persist-credentials: false
         fetch-depth: 0
-    - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78   # v7.6.0
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9   # v9.0.0
       with:
         enable-cache: false
     - run: uv build
