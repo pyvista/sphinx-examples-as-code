@@ -1,0 +1,106 @@
+[build-system]
+build-backend = 'setuptools.build_meta'
+requires = ['setuptools>=64', 'setuptools_scm>=8']
+
+[dependency-groups]
+dev = [
+  'nbformat',
+  'numpydoc',
+  'pre-commit',
+  'pytest',
+  'pytest-cov',
+  'sphinx',
+  'sphinx-design',
+  'trame-pyvista',
+]
+
+[project]
+authors = [{ name = 'The PyVista Developers', email = 'info@pyvista.org' }]
+classifiers = [
+  'Development Status :: 4 - Beta',
+  'Framework :: Sphinx :: Extension',
+  'Intended Audience :: Science/Research',
+  'Operating System :: MacOS',
+  'Operating System :: Microsoft :: Windows',
+  'Operating System :: POSIX :: Linux',
+  'Programming Language :: Python :: 3',
+  'Programming Language :: Python :: 3.10',
+  'Programming Language :: Python :: 3.11',
+  'Programming Language :: Python :: 3.12',
+  'Programming Language :: Python :: 3.13',
+  'Programming Language :: Python :: 3.14',
+  'Topic :: Scientific/Engineering :: Visualization',
+]
+dependencies = ['pyvista>=0.48']
+description = 'Sphinx extension for converting docstring examples into downloadable code.'
+dynamic = ['version']
+keywords = ['download', 'examples', 'sphinx']
+license = 'MIT'
+name = 'sphinx-examples-as-code'
+readme = 'README.md'
+requires-python = '>=3.10'
+
+[project.urls]
+Homepage = 'https://github.com/pyvista/sphinx-examples-as-code'
+
+[tool.coverage.run]
+branch = true
+omit = ["*/_version.py"]
+parallel = true
+source = ['sphinx_examples_as_code']
+
+[tool.pytest.ini_options]
+addopts = "--cov=sphinx_examples_as_code --cov-fail-under=95"
+testpaths = 'tests'
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+quote-style = 'single'
+
+[tool.ruff.lint]
+extend-select = [
+  'A',
+  'B',
+  'C4',
+  'D',
+  'E',
+  'EM',
+  'F',
+  'FA',
+  'I',
+  'ICN',
+  'N',
+  'PERF',
+  'PGH',
+  'PIE',
+  'PT',
+  'RET',
+  'RSE',
+  'RUF',
+  'SIM',
+  'T10',
+  'T20',
+  'TCH',
+  'TID',
+  'UP',
+  'W',
+  'YTT',
+]
+[tool.ruff.lint.per-file-ignores]
+'*/conf.py' = ['E402']
+'tests/*' = ['D103']
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-single-line = true
+force-sort-within-sections = true
+required-imports = ['from __future__ import annotations']
+
+[tool.setuptools]
+packages = ['sphinx_examples_as_code']
+
+[tool.setuptools_scm]
+version_scheme = 'release-branch-semver'
+write_to = 'sphinx_examples_as_code/_version.py'

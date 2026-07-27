@@ -1,0 +1,6 @@
+.DS_Store
+.coverage
+.idea/
+*.egg-info/
+__pycache__/
+sphinx_examples_as_code/_version.py
