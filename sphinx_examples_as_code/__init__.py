@@ -15,11 +15,15 @@ switch.
 Configuration (set in ``conf.py``):
 
 - ``sphinx_examples_as_code_link_position``: control where the download
-  link(s) land within the Examples section.``'top'`` (default) or ``'bottom'``.
+  link(s) land within the Examples section. ``'top'`` (default) or ``'bottom'``.
 - ``sphinx_examples_as_code_formats``: control which downloads to generate.
-  Set this as a list containing `'py'``, ``'ipynb'``, or both (default).
+  Set this as a list containing ``'py'``, ``'ipynb'``, or both (default).
   Downloads are always offered in that order regardless of how the list is
   written.
+- ``sphinx_examples_as_code_base_url``: the site's published base URL (e.g.
+  ``'https://docs.pyvista.org/'``), used to turn cross-references into
+  absolute links a downloaded, standalone file can actually use. ``None``
+  (default) means no base URL is known, so no links are generated anywhere.
 
 Conversion rules applied to the nodes within an Examples section:
 
@@ -29,12 +33,22 @@ Conversion rules applied to the nodes within an Examples section:
   about the input code, not what running it once produced
 - ``.. code-block:: python`` (or ``py``) blocks are kept as-is
 - admonitions such as ``.. note::``/``.. warning::``/``.. seealso::`` become
-  a ``# LABEL:`` comment followed by their content as comments
+  a ``# LABEL:`` comment followed by their content as comments. A "See Also"
+  part is recognized in any of its three forms -- the ``.. seealso::``
+  directive, a bare ``.. rubric:: See Also`` heading, or a hand-written
+  ``See Also`` heading (which docutils nests as its own section,
+  unlike the other two) -- and always renders the same way
 - cross-references and inline code (``:class:``, ``:meth:``, ``:func:``,
   ``:attr:``, double-backtick literals, ...) keep their display text,
-  wrapped in backticks, e.g. :class:`pyvista.Plotter` -> `pyvista.Plotter`
-- plain prose-style references (``:ref:``, ``:doc:``) become their display
-  text with no backticks
+  wrapped in backticks, e.g. :class:`pyvista.Plotter` -> `pyvista.Plotter`.
+  If ``sphinx_examples_as_code_base_url`` is set and the reference resolves,
+  ``.ipynb`` notebooks turn it into a clickable markdown link everywhere;
+  ``.py`` files only do anything with the link inside a "See Also" part,
+  where the reference is written out as ``name url`` on its own line instead
+  -- everywhere else in ``.py``, the link is simply omitted, same as when
+  no base URL is configured at all
+- plain prose-style references (``:ref:``, ``:doc:``) are treated the same
+  way, minus the backticks (since they're not code-styled to begin with)
 - everything else text-bearing (prose, captions, other non-python code) is
   turned into a plain ``#`` comment
 - figures/images, raw HTML, and sphinx-design dropdowns/tab-sets are
@@ -54,7 +68,9 @@ it. The file always ends with a trailing blank line.
 Generated ``.ipynb`` notebooks use the same underlying content, split into
 alternating cells instead of one flat file: each run of ``code`` segments
 becomes a code cell, and each run of prose/directive segments becomes a
-markdown cell.
+markdown cell. Adjacent lines within a markdown cell get an explicit hard
+line break (a trailing double space): markdown otherwise treats a single
+newline as just whitespace and runs everything together into one paragraph.
 
 If the resulting code contains at least one real executable statement, a
 download link for it is added to the Examples section.
@@ -64,11 +80,15 @@ download link for it is added to the Examples section.
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
+from urllib.parse import urlsplit
 
 from docutils import nodes
 from sphinx import addnodes
@@ -169,6 +189,70 @@ def _is_examples_heading(node: nodes.Node) -> bool:
     )
 
 
+def _is_see_also_heading(node: nodes.Node) -> bool:
+    r"""Check whether ``node`` is a heading (rubric or title) named "See Also".
+
+    Docstrings write "see also" content two different ways: a
+    ``.. seealso::`` directive (an admonition, handled via
+    ``_ADMONITION_LABELS``), or a hand-written heading -- either a bare
+    ``.. rubric:: See Also`` (a flat sibling, like "Examples" itself), or
+    plain underline-style ``See Also\\n--------`` text, which docutils
+    turns into a full nested ``nodes.section``. Both heading forms get the
+    same treatment as the directive.
+    """
+    return (
+        isinstance(node, (nodes.rubric, nodes.title))
+        and node.astext().strip().lower() == 'see also'
+    )
+
+
+def _is_see_also_section(node: nodes.Node) -> bool:
+    """Check whether ``node`` is a nested section titled "See Also"."""
+    return (
+        isinstance(node, nodes.section)
+        and bool(node.children)
+        and _is_see_also_heading(node.children[0])
+    )
+
+
+@dataclass(frozen=True)
+class _RenderContext:
+    """State threaded through the conversion functions for one output format."""
+
+    app: Sphinx
+    docname: str
+    fmt: str  # 'py' or 'ipynb'
+    in_see_also: bool = False
+
+
+def _resolve_link_url(node: nodes.reference, ctx: _RenderContext) -> str | None:
+    """Resolve a reference node's target to an absolute URL, if possible.
+
+    Returns ``None`` if there's nothing to link to (an unresolved target),
+    or if no base URL is configured -- a downloaded, standalone file needs
+    an absolute URL to be useful, and Sphinx's own ``refuri``/``refid`` on
+    an internal reference are only meaningful relative to the current page
+    (or the current page itself, for a same-page ``refid`` reference).
+    """
+    refuri = node.get('refuri')
+    if refuri and urlsplit(refuri).netloc:
+        return refuri  # already absolute (an external hyperlink)
+
+    base_url = ctx.app.config.sphinx_examples_as_code_base_url
+    if not base_url:
+        return None
+    current_page_url = urljoin(base_url, ctx.app.builder.get_target_uri(ctx.docname))
+
+    if refuri:
+        return urljoin(current_page_url, refuri)
+
+    refid = node.get('refid')
+    if refid:
+        return f'{current_page_url}#{refid}'
+
+    return None
+
+
 def _add_comment(lines: list[str], text: str) -> None:
     """Append ``text`` to ``lines`` as one or more Python comment lines."""
     for line in text.splitlines():
@@ -202,19 +286,48 @@ def _clean_code_comment(line: str) -> str:
     return line
 
 
-def _render_inline(node: nodes.Node) -> str:
+def _render_reference(node: nodes.reference, ctx: _RenderContext) -> str:
+    """Render a resolved or unresolved cross-reference/hyperlink.
+
+    Code-styled refs (``:class:``/``:meth:``/``:func:``/``:attr:``,
+    wrapping a ``literal``) and plain prose-style refs (``:ref:``/``:doc:``,
+    or an external hyperlink) both land here so their target URL --
+    resolved via ``sphinx_examples_as_code_base_url`` -- can be used: as a
+    clickable markdown link in notebooks (always), and as literal URL text
+    in ``.py`` Examples sections (only within a "See Also" part; everywhere
+    else in ``.py``, the link is simply omitted, same as before this
+    feature existed).
+    """
+    display = node.astext()
+    is_code = any(isinstance(child, nodes.literal) for child in node.children)
+    url = _resolve_link_url(node, ctx)
+
+    if url is None:
+        return f'`{display}`' if is_code else display
+
+    if ctx.fmt == 'ipynb':
+        return f'[`{display}`]({url})' if is_code else f'[{display}]({url})'
+
+    if ctx.in_see_also:
+        # Set off on its own comment line by the surrounding newlines;
+        # _add_comment splits on them the same way it splits any other
+        # multi-line text.
+        return f'\n{display} {url}\n'
+
+    return f'`{display}`' if is_code else display
+
+
+def _render_inline(node: nodes.Node, ctx: _RenderContext) -> str:
     """Render a node's inline content to a plain string.
 
-    Code-like spans -- ``nodes.literal``, which is how docutils/Sphinx render
-    both plain double-backtick literals and resolved ``:class:``/``:meth:``/
-    ``:func:``/``:attr:`` cross-references -- are wrapped in backticks using
-    just their display text (the only part of an explicit-title reference
-    like ``:class:`Display Name <target>``` that's actually visible).
-    Prose-style references (``:ref:``, ``:doc:``, ...), which docutils
-    renders as a plain ``inline`` rather than a ``literal``, keep their
-    display text with no backticks. Any other inline formatting (emphasis,
-    strong, ...) is flattened to plain text.
+    ``nodes.reference`` (a cross-reference or hyperlink) is handled by
+    ``_render_reference``. Any other code-like span -- a plain
+    double-backtick literal, or an unresolved reference's inner literal --
+    is wrapped in backticks using just its display text. Any other inline
+    formatting (emphasis, strong, ...) is flattened to plain text.
     """
+    if isinstance(node, nodes.reference):
+        return _render_reference(node, ctx)
     if isinstance(node, nodes.literal):
         return f'`{node.astext()}`'
     if isinstance(node, (nodes.image, nodes.figure, nodes.raw, nodes.comment)):
@@ -222,7 +335,7 @@ def _render_inline(node: nodes.Node) -> str:
     if isinstance(node, nodes.Text):
         return str(node)
     if hasattr(node, 'children') and node.children:
-        return ''.join(_render_inline(child) for child in node.children)
+        return ''.join(_render_inline(child, ctx) for child in node.children)
     return node.astext()
 
 
@@ -292,18 +405,19 @@ def _convert_literal_block(node: nodes.literal_block) -> list[Segment]:
 
 
 def _convert_admonition(
-    node: nodes.Element, label: str, *, skip_first_title: bool = False
+    node: nodes.Element, label: str, ctx: _RenderContext, *, skip_first_title: bool = False
 ) -> list[Segment]:
     """Convert an admonition-like container to a ``# LABEL:`` directive segment."""
+    inner_ctx = replace(ctx, in_see_also=True) if label.upper() == 'SEE ALSO' else ctx
     inner: list[Segment] = [('text', [f'# {label}:'])]
     for child in node.children:
         if skip_first_title and isinstance(child, nodes.title):
             continue
-        inner.extend(_convert_node(child))
+        inner.extend(_convert_node(child, inner_ctx))
     return [('directive', _join_segments(inner))]
 
 
-def _convert_node(node: nodes.Node) -> list[Segment]:
+def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
     """Convert ``node`` into zero or more segments."""
     if any(_has_class(node, css_class) for css_class in _SKIP_SUBTREE_CLASSES):
         return []
@@ -314,21 +428,27 @@ def _convert_node(node: nodes.Node) -> list[Segment]:
     if isinstance(node, nodes.literal_block):
         return _convert_literal_block(node)
     if type(node) in _ADMONITION_LABELS:
-        return _convert_admonition(node, _ADMONITION_LABELS[type(node)])
+        return _convert_admonition(node, _ADMONITION_LABELS[type(node)], ctx)
+    if _is_see_also_section(node):
+        # a hand-written "See Also\n--------" heading: docutils nests it
+        # (and everything after it, until the next same-level heading) as
+        # a full section rather than a flat sibling -- treat it exactly
+        # like the ``.. seealso::`` directive it's standing in for.
+        return _convert_admonition(node, 'SEE ALSO', ctx, skip_first_title=True)
     if isinstance(node, nodes.admonition):
         # generic ``.. admonition:: Custom Title`` - use its own title as the label
         title_node = node.next_node(nodes.title)
         label = title_node.astext().strip() if title_node is not None else 'NOTE'
-        return _convert_admonition(node, label, skip_first_title=True)
+        return _convert_admonition(node, label, ctx, skip_first_title=True)
     if isinstance(node, _CONTAINER_TYPES):
         segments: list[Segment] = []
         for child in node.children:
-            segments.extend(_convert_node(child))
+            segments.extend(_convert_node(child, ctx))
         return segments
 
     # Plain text-bearing nodes (paragraphs, etc.) - render inline content,
     # backticking code-like cross-references/literals along the way.
-    text = _render_inline(node).strip()
+    text = _render_inline(node, ctx).strip()
     if not text:
         return []
     comment_lines: list[str] = []
@@ -353,14 +473,37 @@ def _span_from(parent: nodes.Element, start: int) -> int:
     """Return the end index (exclusive) of a content span starting at ``start``.
 
     The span extends until (but excludes) the next boundary-type node, or to
-    the end of ``parent``'s children.
+    the end of ``parent``'s children. A "See Also" heading or nested section
+    (see ``_is_see_also_heading``/``_is_see_also_section``) is *not* treated
+    as a boundary: without this, a hand-written "See Also" heading partway
+    through an Examples section would silently truncate everything after it.
     """
     end = start
     for i in range(start, len(parent.children)):
-        if isinstance(parent.children[i], _BOUNDARY_TYPES):
+        child = parent.children[i]
+        if _is_see_also_heading(child) or _is_see_also_section(child):
+            end = i + 1
+            continue
+        if isinstance(child, _BOUNDARY_TYPES):
             break
         end = i + 1
     return end
+
+
+def _find_external_see_also(parent: nodes.Element, start: int, end: int) -> nodes.Node | None:
+    """Find a "See Also" part sited outside the normal ``[start, end)`` span.
+
+    numpydoc's own "See Also" field -- as opposed to a ``.. seealso::``
+    directive a maintainer writes directly inside their Examples text,
+    which stays within the normal span -- gets canonically reordered to
+    sit *before* "Examples", so it would otherwise never be seen at all.
+    """
+    for i, child in enumerate(parent.children):
+        if start <= i < end:
+            continue
+        if type(child) in _ADMONITION_LABELS and _ADMONITION_LABELS[type(child)] == 'SEE ALSO':
+            return child
+    return None
 
 
 def _examples_spans(doctree: nodes.document) -> list[tuple[nodes.Element, int, int, nodes.Node]]:
@@ -442,10 +585,20 @@ def _segments_to_cells(segments: list[Segment]) -> list[tuple[str, list[str]]]:
     return cells
 
 
-def _cell_source(lines: list[str]) -> list[str]:
-    r"""Format lines the way nbformat expects: each ending in ``\\n`` but the last."""
+def _cell_source(lines: list[str], kind: str) -> list[str]:
+    r"""Format lines the way nbformat expects: each ending in ``\\n`` but the last.
+
+    Markdown cells get a trailing hard line break (two spaces) appended to
+    each non-blank line: without it, adjacent lines in the same cell (e.g.
+    the header and its underline, or two "See Also" entries) collapse into
+    one run-together paragraph when rendered, since markdown only breaks
+    lines on a blank line or an explicit hard break -- a single newline is
+    just whitespace.
+    """
     if not lines:
         return []
+    if kind == 'markdown':
+        lines = [f'{line}  ' if line else line for line in lines]
     return [f'{line}\n' for line in lines[:-1]] + [lines[-1]]
 
 
@@ -456,7 +609,7 @@ def _build_notebook(cells: list[tuple[str, list[str]]]) -> dict:
         cell: dict = {
             'cell_type': kind,
             'metadata': {},
-            'source': _cell_source(lines),
+            'source': _cell_source(lines, kind),
             'id': f'cell-{i}',
         }
         if kind == 'code':
@@ -538,6 +691,28 @@ def _make_download_node(entries: list[tuple[str, str]]) -> nodes.paragraph:
     return paragraph
 
 
+def _build_segments(nodes_in_span: list[nodes.Node], ctx: _RenderContext) -> list[Segment]:
+    """Convert a span's nodes into segments.
+
+    A bare ``.. rubric:: See Also`` heading (a flat sibling, like "Examples"
+    itself) isn't wrapped in anything the way ``.. seealso::`` or a nested
+    "See Also" section are, so this gathers everything after it itself,
+    into one merged directive segment -- the same as those other two forms
+    produce via ``_convert_admonition``.
+    """
+    segments: list[Segment] = []
+    for i, node in enumerate(nodes_in_span):
+        if isinstance(node, nodes.rubric) and _is_see_also_heading(node):
+            inner_ctx = replace(ctx, in_see_also=True)
+            inner: list[Segment] = [('text', ['# SEE ALSO:'])]
+            for later_node in nodes_in_span[i + 1 :]:
+                inner.extend(_convert_node(later_node, inner_ctx))
+            segments.append(('directive', _join_segments(inner)))
+            break
+        segments.extend(_convert_node(node, ctx))
+    return segments
+
+
 def _process_span(
     app: Sphinx,
     docname: str,
@@ -550,16 +725,19 @@ def _process_span(
     formats: list[str],
 ) -> None:
     """Convert one Examples span and insert download link(s) if it has real code."""
-    segments: list[Segment] = []
-    for node in parent.children[start:end]:
-        segments.extend(_convert_node(node))
+    nodes_in_span = list(parent.children[start:end])
+    external_see_also = _find_external_see_also(parent, start, end)
+    if external_see_also is not None:
+        nodes_in_span.append(external_see_also)
 
-    if not any(kind == 'code' for kind, _lines in segments):
+    py_ctx = _RenderContext(app=app, docname=docname, fmt='py')
+    py_segments = _build_segments(nodes_in_span, py_ctx)
+
+    if not any(kind == 'code' for kind, _lines in py_segments):
         return
 
     name = _qualified_name_for(heading, docname, counter)
-    all_segments = [_header_segment(name), *segments]
-    source = '\n'.join(_join_segments(all_segments)).rstrip() + '\n\n'
+    source = '\n'.join(_join_segments([_header_segment(name), *py_segments])).rstrip() + '\n\n'
 
     if not _has_real_code(source):
         return
@@ -569,11 +747,13 @@ def _process_span(
         if fmt not in formats:
             continue
         label = _FORMAT_LABELS[fmt]
-        if fmt == 'ipynb':
-            notebook = _build_notebook(_segments_to_cells(all_segments))
-            rel_path = _write_notebook(app, name, notebook)
-        else:
+        if fmt == 'py':
             rel_path = _write_source(app, name, source)
+        else:
+            ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
+            ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
+            cells = _segments_to_cells([_header_segment(name), *ipynb_segments])
+            rel_path = _write_notebook(app, name, _build_notebook(cells))
         entries.append((label, rel_path))
 
     if not entries:
@@ -612,6 +792,7 @@ def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     app.connect('doctree-resolved', _process_doctree)
     app.add_config_value('sphinx_examples_as_code_link_position', 'top', 'env')
     app.add_config_value('sphinx_examples_as_code_formats', ['py', 'ipynb'], 'env')
+    app.add_config_value('sphinx_examples_as_code_base_url', None, 'env')
 
     return {
         'version': '0.1',

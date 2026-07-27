@@ -26,6 +26,20 @@ def _parse(rst: str) -> nodes.document:
     return publish_doctree(rst, settings_overrides={'report_level': 5})
 
 
+def _ctx(
+    *,
+    fmt: str = 'py',
+    in_see_also: bool = False,
+    base_url: str | None = None,
+    docname: str = 'page',
+):
+    """Build a minimal ``_RenderContext`` with a mocked Sphinx app."""
+    app = Mock()
+    app.config.sphinx_examples_as_code_base_url = base_url
+    app.builder.get_target_uri.side_effect = lambda d: f'{d}.html'
+    return seac._RenderContext(app=app, docname=docname, fmt=fmt, in_see_also=in_see_also)
+
+
 # ---------------------------------------------------------------------------
 # _has_class
 # ---------------------------------------------------------------------------
@@ -86,21 +100,166 @@ def test_add_comment_multiline_with_blank_line():
 
 def test_render_inline_literal():
     doctree = _parse('``code``')
-    assert seac._render_inline(doctree[0][0]) == '`code`'
+    assert seac._render_inline(doctree[0][0], _ctx()) == '`code`'
 
 
 def test_render_inline_plain_text():
     doctree = _parse('hello world')
-    assert seac._render_inline(doctree[0]) == 'hello world'
+    assert seac._render_inline(doctree[0], _ctx()) == 'hello world'
 
 
 def test_render_inline_image_returns_empty():
     doctree = _parse('.. image:: foo.png')
-    assert seac._render_inline(doctree[0]) == ''
+    assert seac._render_inline(doctree[0], _ctx()) == ''
 
 
 def test_render_inline_childless_fallback_to_astext():
-    assert seac._render_inline(nodes.transition()) == ''
+    assert seac._render_inline(nodes.transition(), _ctx()) == ''
+
+
+# ---------------------------------------------------------------------------
+# _is_see_also_heading
+# ---------------------------------------------------------------------------
+
+
+def test_is_see_also_heading_rubric():
+    doctree = _parse('.. rubric:: See Also')
+    assert seac._is_see_also_heading(doctree[0])
+
+
+def test_is_see_also_heading_case_insensitive():
+    doctree = _parse('.. rubric:: SEE ALSO')
+    assert seac._is_see_also_heading(doctree[0])
+
+
+def test_is_see_also_heading_wrong_text():
+    doctree = _parse('.. rubric:: Notes')
+    assert not seac._is_see_also_heading(doctree[0])
+
+
+def test_is_see_also_heading_wrong_node_type():
+    doctree = _parse('See Also is not this paragraph')
+    assert not seac._is_see_also_heading(doctree[0])
+
+
+# ---------------------------------------------------------------------------
+# _resolve_link_url
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_link_url_no_refuri_returns_none():
+    ref = nodes.reference()
+    assert seac._resolve_link_url(ref, _ctx(base_url='https://docs.example.com/')) is None
+
+
+def test_resolve_link_url_no_base_url_configured_returns_none():
+    ref = nodes.reference()
+    ref['refuri'] = 'foo.html#bar'
+    assert seac._resolve_link_url(ref, _ctx(base_url=None)) is None
+
+
+def test_resolve_link_url_external_hyperlink_already_absolute():
+    ref = nodes.reference()
+    ref['refuri'] = 'https://example.com/page'
+    # an external hyperlink's refuri is already a full URL -- it resolves
+    # even with no base_url configured, since there's nothing to join
+    assert seac._resolve_link_url(ref, _ctx(base_url=None)) == 'https://example.com/page'
+
+
+def test_resolve_link_url_internal_reference_resolved_against_base_url():
+    ref = nodes.reference()
+    ref['refuri'] = '../plotting/_autosummary/pyvista.Plotter.html#pyvista.Plotter'
+    ctx = _ctx(
+        base_url='https://docs.pyvista.org/',
+        docname='api/core/_autosummary/pyvista.PolyData',
+    )
+    url = seac._resolve_link_url(ref, ctx)
+    assert (
+        url == 'https://docs.pyvista.org/api/core/plotting/_autosummary/pyvista.Plotter.html'
+        '#pyvista.Plotter'
+    )
+
+
+def test_resolve_link_url_same_page_reference_uses_refid():
+    # a reference to a target on the *same* page has no refuri at all --
+    # Sphinx uses refid (an in-page anchor) instead
+    ref = nodes.reference()
+    ref['refid'] = 'docstring_cases.Sample'
+    ctx = _ctx(base_url='https://docs.pyvista.org/', docname='docstring_cases')
+    url = seac._resolve_link_url(ref, ctx)
+    assert url == 'https://docs.pyvista.org/docstring_cases.html#docstring_cases.Sample'
+
+
+# ---------------------------------------------------------------------------
+# _render_reference
+# ---------------------------------------------------------------------------
+
+
+def _reference_with_literal(display: str, refuri: str | None) -> nodes.reference:
+    """Build a reference wrapping a literal, like a resolved :class:/:meth:/... xref."""
+    ref = nodes.reference()
+    if refuri:
+        ref['refuri'] = refuri
+    ref += nodes.literal('', display)
+    return ref
+
+
+def _reference_plain(display: str, refuri: str | None) -> nodes.reference:
+    """Build a reference with no inner literal, like a :ref:/:doc: or external hyperlink."""
+    ref = nodes.reference()
+    if refuri:
+        ref['refuri'] = refuri
+    ref += nodes.Text(display)
+    return ref
+
+
+def test_render_reference_code_no_url_backtick_wrapped():
+    ref = _reference_with_literal('pyvista.Plotter', None)
+    assert seac._render_reference(ref, _ctx(fmt='py')) == '`pyvista.Plotter`'
+    assert seac._render_reference(ref, _ctx(fmt='ipynb')) == '`pyvista.Plotter`'
+
+
+def test_render_reference_plain_no_url_no_backticks():
+    ref = _reference_plain('Some Section', None)
+    assert seac._render_reference(ref, _ctx(fmt='py')) == 'Some Section'
+    assert seac._render_reference(ref, _ctx(fmt='ipynb')) == 'Some Section'
+
+
+def test_render_reference_py_non_see_also_omits_url_even_when_resolved():
+    ref = _reference_with_literal('pyvista.Plotter', 'plotter.html')
+    ctx = _ctx(fmt='py', in_see_also=False, base_url='https://docs.pyvista.org/')
+    assert seac._render_reference(ref, ctx) == '`pyvista.Plotter`'
+
+
+def test_render_reference_py_see_also_uses_name_and_url_on_own_line():
+    ref = _reference_with_literal('pyvista.Plotter', 'plotter.html')
+    ctx = _ctx(fmt='py', in_see_also=True, base_url='https://docs.pyvista.org/')
+    result = seac._render_reference(ref, ctx)
+    assert result == '\npyvista.Plotter https://docs.pyvista.org/plotter.html\n'
+    assert '`' not in result
+
+
+def test_render_reference_ipynb_code_resolved_becomes_markdown_link():
+    ref = _reference_with_literal('pyvista.Plotter', 'plotter.html')
+    ctx = _ctx(fmt='ipynb', base_url='https://docs.pyvista.org/')
+    assert (
+        seac._render_reference(ref, ctx)
+        == '[`pyvista.Plotter`](https://docs.pyvista.org/plotter.html)'
+    )
+
+
+def test_render_reference_ipynb_plain_resolved_becomes_markdown_link():
+    ref = _reference_plain('Some Section', 'other.html')
+    ctx = _ctx(fmt='ipynb', base_url='https://docs.pyvista.org/')
+    assert seac._render_reference(ref, ctx) == '[Some Section](https://docs.pyvista.org/other.html)'
+
+
+def test_render_reference_ipynb_in_see_also_same_as_elsewhere():
+    # per spec: ipynb treats See Also refs exactly like any other ref
+    ref = _reference_with_literal('pyvista.Plotter', 'plotter.html')
+    ctx_outside = _ctx(fmt='ipynb', in_see_also=False, base_url='https://docs.pyvista.org/')
+    ctx_inside = _ctx(fmt='ipynb', in_see_also=True, base_url='https://docs.pyvista.org/')
+    assert seac._render_reference(ref, ctx_outside) == seac._render_reference(ref, ctx_inside)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +419,7 @@ def test_clean_code_comment_replaces_non_ascii_chars(unicode_char: int, ascii_ch
 
 def test_convert_node_note():
     doctree = _parse('.. note::\n\n   hello')
-    assert seac._convert_node(doctree[0]) == [('directive', ['# NOTE:', '# hello'])]
+    assert seac._convert_node(doctree[0], _ctx()) == [('directive', ['# NOTE:', '# hello'])]
 
 
 def test_convert_node_seealso():
@@ -271,12 +430,37 @@ def test_convert_node_seealso():
     p2 += nodes.Text('More info')
     node += p1
     node += p2
-    assert seac._convert_node(node) == [('directive', ['# SEE ALSO:', '# See X', '# More info'])]
+    assert seac._convert_node(node, _ctx()) == [
+        ('directive', ['# SEE ALSO:', '# See X', '# More info'])
+    ]
+
+
+def test_convert_node_seealso_propagates_in_see_also_to_references():
+    # a reference nested inside .. seealso:: should get the "See Also"
+    # link treatment (name + url on its own line), not the regular
+    # link-omitted treatment it'd get anywhere else in a .py file
+    node = addnodes.seealso()
+    p = nodes.paragraph()
+    p += _reference_with_literal('pyvista.Plotter', 'plotter.html')
+    node += p
+    ctx = _ctx(fmt='py', base_url='https://docs.pyvista.org/')
+    segments = seac._convert_node(node, ctx)
+    assert segments == [
+        ('directive', ['# SEE ALSO:', '# pyvista.Plotter https://docs.pyvista.org/plotter.html'])
+    ]
+
+
+def test_convert_node_see_also_section_treated_like_admonition():
+    doctree = _parse('Intro\n-----\n\nintro\n\nSee Also\n--------\n\n>>> x = 1')
+    see_also_section = doctree[1]
+    assert seac._convert_node(see_also_section, _ctx()) == [('directive', ['# SEE ALSO:', 'x = 1'])]
 
 
 def test_convert_node_generic_admonition_uses_title():
     doctree = _parse('.. admonition:: Custom Title\n\n   body text')
-    assert seac._convert_node(doctree[0]) == [('directive', ['# Custom Title:', '# body text'])]
+    assert seac._convert_node(doctree[0], _ctx()) == [
+        ('directive', ['# Custom Title:', '# body text'])
+    ]
 
 
 def test_convert_node_generic_admonition_no_title_defaults_to_note():
@@ -284,12 +468,12 @@ def test_convert_node_generic_admonition_no_title_defaults_to_note():
     p = nodes.paragraph()
     p += nodes.Text('body')
     node += p
-    assert seac._convert_node(node) == [('directive', ['# NOTE:', '# body'])]
+    assert seac._convert_node(node, _ctx()) == [('directive', ['# NOTE:', '# body'])]
 
 
 def test_convert_node_admonition_with_no_body_keeps_label():
     node = nodes.note()
-    assert seac._convert_node(node) == [('directive', ['# NOTE:'])]
+    assert seac._convert_node(node, _ctx()) == [('directive', ['# NOTE:'])]
 
 
 def test_convert_node_skip_subtree_class():
@@ -297,12 +481,12 @@ def test_convert_node_skip_subtree_class():
     p = nodes.paragraph()
     p += nodes.Text('hidden')
     node += p
-    assert seac._convert_node(node) == []
+    assert seac._convert_node(node, _ctx()) == []
 
 
 def test_convert_node_ignored_type():
     doctree = _parse('.. image:: foo.png')
-    assert seac._convert_node(doctree[0]) == []
+    assert seac._convert_node(doctree[0], _ctx()) == []
 
 
 def test_convert_node_versionmodified():
@@ -310,24 +494,24 @@ def test_convert_node_versionmodified():
     p = nodes.paragraph()
     p += nodes.Text('Added in version 1.0.')
     node += p
-    assert seac._convert_node(node) == [('text', ['# Added in version 1.0.'])]
+    assert seac._convert_node(node, _ctx()) == [('text', ['# Added in version 1.0.'])]
 
 
 def test_convert_node_container_recurses():
     doctree = _parse('- item one\n- item two')
-    segments = seac._convert_node(doctree[0])
+    segments = seac._convert_node(doctree[0], _ctx())
     assert segments == [('text', ['# item one']), ('text', ['# item two'])]
 
 
 def test_convert_node_empty_paragraph_returns_empty():
-    assert seac._convert_node(nodes.paragraph()) == []
+    assert seac._convert_node(nodes.paragraph(), _ctx()) == []
 
 
 def test_convert_node_literal_block_dispatch():
     node = nodes.literal_block('', 'x = 1')
     node['language'] = 'python'
 
-    assert seac._convert_node(node) == [('code', ['x = 1'])]
+    assert seac._convert_node(node, _ctx()) == [('code', ['x = 1'])]
 
 
 # ---------------------------------------------------------------------------
@@ -357,9 +541,55 @@ def test_has_real_code_empty():
 
 
 def test_span_from_stops_at_boundary():
-    doctree = _parse('.. rubric:: Examples\n\ntext\n\n.. rubric:: See Also\n\nmore')
+    doctree = _parse('.. rubric:: Examples\n\ntext\n\n.. rubric:: Notes\n\nmore')
     end = seac._span_from(doctree, 1)
     assert end == 2  # only the paragraph, not the second rubric or beyond
+
+
+def test_span_from_does_not_stop_at_see_also_rubric():
+    doctree = _parse('.. rubric:: Examples\n\ntext\n\n.. rubric:: See Also\n\nmore')
+    end = seac._span_from(doctree, 1)
+    assert end == len(doctree.children)
+
+
+def test_span_from_does_not_stop_at_see_also_section():
+    # a hand-written "See Also\n--------" heading nests as its own section
+    # rather than staying a flat sibling -- still shouldn't truncate the span
+    doctree = _parse('.. rubric:: Examples\n\ntext\n\nSee Also\n--------\n\nmore')
+    end = seac._span_from(doctree, 1)
+    assert end == len(doctree.children)
+
+
+def test_is_see_also_section_true():
+    doctree = _parse('Intro\n-----\n\nintro text\n\nSee Also\n--------\n\nsome text')
+    see_also_section = doctree[1]
+    assert seac._is_see_also_section(see_also_section)
+
+
+def test_is_see_also_section_false_for_other_heading():
+    doctree = _parse('Intro\n-----\n\nintro text\n\nNotes\n-----\n\nsome text')
+    other_section = doctree[1]
+    assert not seac._is_see_also_section(other_section)
+
+
+def test_find_external_see_also_found_before_span():
+    # numpydoc's own "See Also" field is canonically reordered before
+    # "Examples", so it sits *before* the span rather than inside it
+    doctree = _parse('.. rubric:: Examples\n\ntext')
+    seealso_node = addnodes.seealso()
+    seealso_node += nodes.paragraph('', 'related')
+    doctree.insert(0, seealso_node)  # now: [seealso, rubric, text]
+
+    start = 2  # right after the rubric, now at index 1
+    end = seac._span_from(doctree, start)
+    found = seac._find_external_see_also(doctree, start, end)
+    assert found is seealso_node
+
+
+def test_find_external_see_also_returns_none_when_absent():
+    doctree = _parse('.. rubric:: Examples\n\ntext')
+    found = seac._find_external_see_also(doctree, 1, len(doctree.children))
+    assert found is None
 
 
 def test_span_from_runs_to_end_of_parent():
@@ -502,12 +732,37 @@ def test_segments_to_cells_empty_input():
     assert seac._segments_to_cells([]) == []
 
 
-def test_cell_source_trailing_newlines_except_last():
-    assert seac._cell_source(['a', 'b', 'c']) == ['a\n', 'b\n', 'c']
+def test_segments_to_cells_skips_empty_lines_segment():
+    # a segment with no lines at all (e.g. a no-op admonition) shouldn't
+    # start a new cell or otherwise affect grouping
+    segments = [
+        ('text', ['# prose']),
+        ('text', []),
+        ('code', ['x = 1']),
+    ]
+    cells = seac._segments_to_cells(segments)
+    assert cells == [
+        ('markdown', ['prose']),
+        ('code', ['x = 1']),
+    ]
+
+
+def test_cell_source_code_no_hard_break():
+    assert seac._cell_source(['a', 'b', 'c'], 'code') == ['a\n', 'b\n', 'c']
+
+
+def test_cell_source_markdown_adds_hard_break():
+    assert seac._cell_source(['a', 'b', 'c'], 'markdown') == ['a  \n', 'b  \n', 'c  ']
+
+
+def test_cell_source_markdown_blank_line_no_hard_break():
+    # a genuinely blank line stays blank -- adding trailing spaces there
+    # wouldn't be a meaningful hard break, just stray whitespace
+    assert seac._cell_source(['a', '', 'b'], 'markdown') == ['a  \n', '\n', 'b  ']
 
 
 def test_cell_source_empty():
-    assert seac._cell_source([]) == []
+    assert seac._cell_source([], 'code') == []
 
 
 def test_build_notebook_structure():
@@ -563,6 +818,44 @@ def _build_examples_doctree(rst: str):
     return doctree, parent, start, end, heading
 
 
+def test_build_segments_bare_rubric_switches_to_see_also():
+    _doctree, parent, start, end, _heading = _build_examples_doctree(
+        '.. rubric:: Examples\n\n>>> x = 1\n\n.. rubric:: See Also\n\n>>> y = 2'
+    )
+    nodes_in_span = list(parent.children[start:end])
+    segments = seac._build_segments(nodes_in_span, _ctx())
+    assert segments == [
+        ('code', ['x = 1']),
+        ('directive', ['# SEE ALSO:', 'y = 2']),
+    ]
+
+
+def test_build_segments_bare_rubric_see_also_affects_only_what_follows():
+    _doctree, parent, start, end, _heading = _build_examples_doctree(
+        '.. rubric:: Examples\n\n.. rubric:: See Also\n\n>>> x = 1'
+    )
+    nodes_in_span = list(parent.children[start:end])
+    # a reference-only paragraph inserted right after the rubric: since
+    # it's *after* the "See Also" switch, it should get the See Also
+    # treatment (name + url), not the regular link-omitted treatment
+    ref_paragraph = nodes.paragraph()
+    ref_paragraph += _reference_with_literal('pyvista.Plotter', 'plotter.html')
+    nodes_in_span.insert(1, ref_paragraph)
+
+    ctx = _ctx(fmt='py', base_url='https://docs.pyvista.org/')
+    segments = seac._build_segments(nodes_in_span, ctx)
+    assert segments == [
+        (
+            'directive',
+            [
+                '# SEE ALSO:',
+                '# pyvista.Plotter https://docs.pyvista.org/plotter.html',
+                'x = 1',
+            ],
+        )
+    ]
+
+
 def test_process_span_no_code_no_download(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     _doctree, parent, start, end, heading = _build_examples_doctree(
@@ -601,6 +894,28 @@ def test_process_span_inserts_at_top(tmp_path: Path):
     )
     seac._process_span(app, 'page', parent, start, end, heading, 1, 'top', ['py', 'ipynb'])
     assert isinstance(parent.children[start], nodes.paragraph)
+
+
+def test_process_span_includes_external_see_also(tmp_path: Path):
+    # numpydoc's own "See Also" field sits before "Examples", outside the
+    # normal span -- _process_span should still fold it into the output
+    app = Mock(outdir=str(tmp_path))
+    doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
+    seealso_node = addnodes.seealso()
+    seealso_node += nodes.paragraph('', 'related info')
+    doctree.insert(0, seealso_node)
+
+    heading = doctree[1]
+    parent = heading.parent
+    start = parent.index(heading) + 1
+    end = seac._span_from(parent, start)
+
+    seac._process_span(app, 'page', parent, start, end, heading, 1, 'bottom', ['py'])
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    content = written.read_text()
+    assert '# SEE ALSO:' in content
+    assert '# related info' in content
 
 
 @pytest.mark.parametrize(
@@ -667,9 +982,10 @@ def test_setup_registers_connect_and_config():
     app = Mock()
     result = seac.setup(app)
     app.connect.assert_called_once_with('doctree-resolved', seac._process_doctree)
-    assert app.add_config_value.call_count == 2
+    assert app.add_config_value.call_count == 3
     app.add_config_value.assert_any_call('sphinx_examples_as_code_link_position', 'top', 'env')
     app.add_config_value.assert_any_call('sphinx_examples_as_code_formats', ['py', 'ipynb'], 'env')
+    app.add_config_value.assert_any_call('sphinx_examples_as_code_base_url', None, 'env')
     assert result['parallel_read_safe'] is True
     assert result['parallel_write_safe'] is True
 
@@ -690,4 +1006,4 @@ def test_add_comment_normalizes_smart_quotes():
 
 def test_convert_node_paragraph_normalizes_smart_quotes():
     doctree = _parse('an array\u2019s \u201cvalues\u201d')
-    assert seac._convert_node(doctree[0]) == [('text', ['# an array\'s "values"'])]
+    assert seac._convert_node(doctree[0], _ctx()) == [('text', ['# an array\'s "values"'])]

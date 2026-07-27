@@ -432,3 +432,85 @@ def test_formats_config_selection(
     html = (html_dir / 'docstring_cases.html').read_text(encoding='utf-8')
     assert ('Download Python source code' in html) == expect_py
     assert ('Download Jupyter notebook' in html) == expect_ipynb
+
+
+# ---------------------------------------------------------------------------
+# sphinx_examples_as_code_base_url and See Also link resolution
+# ---------------------------------------------------------------------------
+
+
+def test_base_url_unset_no_links_anywhere(
+    built: tuple[Path, list[Path]], built_notebooks: list[Path]
+):
+    """Default (``base_url=None``): no links anywhere, in either format -- the status quo."""
+    for name in (
+        'case_regular_xref_for_base_url',
+        'case_see_also_directive_for_base_url',
+        'case_see_also_bare_rubric_for_base_url',
+        'case_see_also_underline_heading_for_base_url',
+    ):
+        py_src = _read(built[1], name)
+        assert 'http' not in py_src
+
+        nb_path = next(p for p in built_notebooks if p.stem == f'docstring_cases_{name}')
+        nb_text = nb_path.read_text(encoding='utf-8')
+        assert 'http' not in nb_text
+        assert '](' not in nb_text  # no markdown links
+
+
+def test_base_url_set_resolves_links(tmp_path: Path):
+    # With a base URL configured, See Also parts (in any form) get literal URL
+    # text in .py and clickable markdown links in .ipynb; regular refs only get
+    # the link in .ipynb, and .py stays link-free outside a See Also part.
+    html_dir = tmp_path / 'html'
+    doctree_dir = tmp_path / 'doctrees'
+    returncode, out, err = _run_sphinx_build(
+        _sphinx_build_cmd(
+            SRCDIR,
+            html_dir,
+            doctree_dir,
+            ('-D', 'sphinx_examples_as_code_base_url=https://docs.example.com/'),
+        ),
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+
+    downloads_dir = html_dir / '_downloads'
+    py_files = list(downloads_dir.rglob('*.py'))
+    ipynb_files = list(downloads_dir.rglob('*.ipynb'))
+
+    # a regular (non-See-Also) reference: link resolved in .ipynb, omitted in .py
+    regular_py = _read(py_files, 'case_regular_xref_for_base_url')
+    assert 'http' not in regular_py
+    assert '`docstring_cases.Sample`' in regular_py
+
+    regular_nb = next(
+        p for p in ipynb_files if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
+    ).read_text(encoding='utf-8')
+    assert '[`docstring_cases.Sample`](https://docs.example.com/' in regular_nb
+
+    # all three See Also forms should behave identically
+    for name in (
+        'case_see_also_directive_for_base_url',
+        'case_see_also_bare_rubric_for_base_url',
+        'case_see_also_underline_heading_for_base_url',
+    ):
+        py_src = _read(py_files, name)
+        assert '# SEE ALSO:' in py_src
+        assert '# docstring_cases.Sample https://docs.example.com/' in py_src
+        assert '`docstring_cases.Sample`' not in py_src  # no backticks in See Also url lines
+
+        nb_path = next(p for p in ipynb_files if p.stem == f'docstring_cases_{name}')
+        nb_text = nb_path.read_text(encoding='utf-8')
+        assert '[`docstring_cases.Sample`](https://docs.example.com/' in nb_text
+
+
+def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
+    """Adjacent lines within one markdown cell need an explicit hard break.
+
+    Without it, markdown treats a single newline as whitespace and runs
+    everything in the cell together into one paragraph.
+    """
+    nb_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_note')
+    notebook = json.loads(nb_path.read_text(encoding='utf-8'))
+    header_cell = next(c for c in notebook['cells'] if c['cell_type'] == 'markdown')
+    assert header_cell['source'][0].endswith('  \n')

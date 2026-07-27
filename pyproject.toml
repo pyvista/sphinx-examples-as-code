@@ -45,12 +45,12 @@ Homepage = 'https://github.com/pyvista/sphinx-examples-as-code'
 
 [tool.coverage.run]
 branch = true
-omit = ["*/_version.py"]
+omit = ['*/_version.py']
 parallel = true
 source = ['sphinx_examples_as_code']
 
 [tool.pytest.ini_options]
-addopts = "--cov=sphinx_examples_as_code --cov-fail-under=95"
+addopts = '--cov=sphinx_examples_as_code --cov-fail-under=95'
 testpaths = 'tests'
 
 [tool.ruff]

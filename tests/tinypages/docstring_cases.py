@@ -330,6 +330,72 @@ def case_stray_xref_in_doctest_comment():
     """
 
 
+def case_regular_xref_for_base_url():
+    """Docstring with a plain cross-reference, outside any See Also part.
+
+    With ``sphinx_examples_as_code_base_url`` configured: the .ipynb should
+    turn this into a clickable link; the .py should still omit the link
+    entirely (status quo), same as when no base URL is configured at all.
+
+    Examples
+    --------
+    See :class:`docstring_cases.Sample` for details.
+
+    >>> import sys
+
+    """
+
+
+def case_see_also_directive_for_base_url():
+    """Docstring with a ``.. seealso::`` directive containing a cross-reference.
+
+    With a base URL configured: both formats should resolve the link, but
+    the .py file should write it as literal ``name url`` text while the
+    .ipynb should render it as a real markdown link.
+
+    Examples
+    --------
+    >>> import sys
+
+    .. seealso::
+
+        :class:`docstring_cases.Sample`
+
+    """
+
+
+def case_see_also_bare_rubric_for_base_url():
+    """Docstring with a bare ``.. rubric:: See Also`` heading (a flat sibling).
+
+    Examples
+    --------
+    >>> import sys
+
+    .. rubric:: See Also
+
+    :class:`docstring_cases.Sample`
+
+    """
+
+
+def case_see_also_underline_heading_for_base_url():
+    """Docstring with a hand-written ``See Also`` underline-style heading.
+
+    Unlike the rubric form above, this nests as its own section rather
+    than staying a flat sibling -- exercising the other code path for the
+    same logical "See Also" part.
+
+    Examples
+    --------
+    >>> import sys
+
+    See Also
+    --------
+    :class:`docstring_cases.Sample`
+
+    """
+
+
 class Sample:
     """A sample class used as a cross-reference target above."""
 
