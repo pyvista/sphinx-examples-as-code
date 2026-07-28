@@ -88,6 +88,7 @@ extend-select = [
   'W',
   'YTT',
 ]
+ignore = ['D203', 'D211', 'D213']
 [tool.ruff.lint.per-file-ignores]
 '*/conf.py' = ['E402']
 'tests/*' = ['D103']

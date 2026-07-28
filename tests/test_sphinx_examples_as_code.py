@@ -15,6 +15,7 @@ from docutils import nodes
 from docutils.core import publish_doctree
 import pytest
 from sphinx import addnodes
+from sphinx.errors import ConfigError
 
 import sphinx_examples_as_code as seac
 
@@ -981,13 +982,61 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
 def test_setup_registers_connect_and_config():
     app = Mock()
     result = seac.setup(app)
-    app.connect.assert_called_once_with('doctree-resolved', seac._process_doctree)
+    app.connect.assert_any_call('doctree-resolved', seac._process_doctree)
+    app.connect.assert_any_call('config-inited', seac._validate_base_url)
     assert app.add_config_value.call_count == 3
     app.add_config_value.assert_any_call('sphinx_examples_as_code_link_position', 'top', 'env')
     app.add_config_value.assert_any_call('sphinx_examples_as_code_formats', ['py', 'ipynb'], 'env')
     app.add_config_value.assert_any_call('sphinx_examples_as_code_base_url', None, 'env')
     assert result['parallel_read_safe'] is True
     assert result['parallel_write_safe'] is True
+
+
+# ---------------------------------------------------------------------------
+# _validate_base_url
+# ---------------------------------------------------------------------------
+
+
+def test_validate_base_url_none_is_a_no_op():
+    config = Mock(sphinx_examples_as_code_base_url=None)
+    seac._validate_base_url(Mock(), config)
+    assert config.sphinx_examples_as_code_base_url is None
+
+
+def test_validate_base_url_missing_scheme_raises():
+    config = Mock(sphinx_examples_as_code_base_url='docs.example.com/')
+    with pytest.raises(ConfigError, match='does not look like a valid absolute URL'):
+        seac._validate_base_url(Mock(), config)
+
+
+def test_validate_base_url_garbage_raises():
+    config = Mock(sphinx_examples_as_code_base_url='not a url at all')
+    with pytest.raises(ConfigError):
+        seac._validate_base_url(Mock(), config)
+
+
+def test_validate_base_url_non_http_scheme_raises():
+    config = Mock(sphinx_examples_as_code_base_url='ftp://docs.example.com/')
+    with pytest.raises(ConfigError):
+        seac._validate_base_url(Mock(), config)
+
+
+def test_validate_base_url_adds_missing_trailing_slash():
+    config = Mock(sphinx_examples_as_code_base_url='https://docs.example.com/en/stable')
+    seac._validate_base_url(Mock(), config)
+    assert config.sphinx_examples_as_code_base_url == 'https://docs.example.com/en/stable/'
+
+
+def test_validate_base_url_leaves_trailing_slash_alone():
+    config = Mock(sphinx_examples_as_code_base_url='https://docs.example.com/en/stable/')
+    seac._validate_base_url(Mock(), config)
+    assert config.sphinx_examples_as_code_base_url == 'https://docs.example.com/en/stable/'
+
+
+def test_validate_base_url_bare_domain_gets_trailing_slash():
+    config = Mock(sphinx_examples_as_code_base_url='https://docs.example.com')
+    seac._validate_base_url(Mock(), config)
+    assert config.sphinx_examples_as_code_base_url == 'https://docs.example.com/'
 
 
 # ---------------------------------------------------------------------------

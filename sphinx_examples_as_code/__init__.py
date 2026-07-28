@@ -24,6 +24,9 @@ Configuration (set in ``conf.py``):
   ``'https://docs.pyvista.org/'``), used to turn cross-references into
   absolute links a downloaded, standalone file can actually use. ``None``
   (default) means no base URL is known, so no links are generated anywhere.
+  A missing trailing slash is added automatically; a value with no scheme
+  or host raises a configuration error at build start rather than silently
+  producing wrong links throughout the build.
 
 Conversion rules applied to the nodes within an Examples section:
 
@@ -92,9 +95,11 @@ from urllib.parse import urlsplit
 
 from docutils import nodes
 from sphinx import addnodes
+from sphinx.errors import ConfigError
 
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
+    from sphinx.config import Config
 
 # Node types that mark a heading (the start of some other section) and
 # therefore bound the end of whatever Examples section precedes them.
@@ -787,9 +792,37 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
         _process_span(app, docname, parent, start, end, heading, counter, position, formats)
 
 
+def _validate_base_url(_app: Sphinx, config: Config) -> None:
+    """Validate and normalize ``sphinx_examples_as_code_base_url``.
+
+    Catches the two most common typos loudly instead of silently
+    generating wrong links throughout the whole build: a missing scheme
+    (``docs.example.com`` instead of ``https://docs.example.com``) parses
+    with no scheme *and* no netloc at all, and a base URL with a subpath
+    but no trailing slash (``.../en/stable`` instead of ``.../en/stable/``)
+    makes ``urljoin`` silently drop the last path segment when resolving
+    links. No network access is used or needed -- this only checks shape.
+    """
+    base_url = config.sphinx_examples_as_code_base_url
+    if not base_url:
+        return
+
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        msg = (
+            f'sphinx_examples_as_code_base_url={base_url!r} does not look like a '
+            "valid absolute URL (expected something like 'https://docs.example.com/')."
+        )
+        raise ConfigError(msg)
+
+    if not base_url.endswith('/'):
+        config.sphinx_examples_as_code_base_url = base_url + '/'
+
+
 def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     """Register the extension."""
     app.connect('doctree-resolved', _process_doctree)
+    app.connect('config-inited', _validate_base_url)
     app.add_config_value('sphinx_examples_as_code_link_position', 'top', 'env')
     app.add_config_value('sphinx_examples_as_code_formats', ['py', 'ipynb'], 'env')
     app.add_config_value('sphinx_examples_as_code_base_url', None, 'env')
