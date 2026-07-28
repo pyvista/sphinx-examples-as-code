@@ -1,83 +1,6 @@
-"""Generate downloadable Python source files from docstring "Examples" sections.
+"""Generate downloadable Python/Jupyter files from docstring "Examples" sections.
 
-This Sphinx extension looks, on every page, for numpydoc-style "Examples"
-headings -- rendered as ``.. rubric:: Examples`` for docstrings, or as a
-regular section title on hand-written pages that happen to reuse that
-heading -- and turns the content of each one into a small, self-contained,
-runnable example, with a download link for `.py` and/or `.ipynb` file(s)
-inserted into the section.
-
-Everything outside of an Examples section is left completely alone: pages
-or docstrings without one produce no file and no link. Enabling this
-extension (adding it to ``conf.py``'s ``extensions``) is itself the on/off
-switch.
-
-Configuration (set in ``conf.py``):
-
-- ``sphinx_examples_as_code_link_position``: control where the download
-  link(s) land within the Examples section. ``'top'`` (default) or ``'bottom'``.
-- ``sphinx_examples_as_code_formats``: control which downloads to generate.
-  Set this as a list containing ``'py'``, ``'ipynb'``, or both (default).
-  Downloads are always offered in that order regardless of how the list is
-  written.
-- ``sphinx_examples_as_code_base_url``: the site's published base URL (e.g.
-  ``'https://docs.pyvista.org/'``), used to turn cross-references into
-  absolute links a downloaded, standalone file can actually use. ``None``
-  (default) means no base URL is known, so no links are generated anywhere.
-  A missing trailing slash is added automatically; a value with no scheme
-  or host raises a configuration error at build start rather than silently
-  producing wrong links throughout the build.
-
-Conversion rules applied to the nodes within an Examples section:
-
-- doctest blocks (``>>> ...`` / ``... ...``) keep their input lines, with
-  the prompts stripped, as real Python source; doctest *output* lines
-  (expected results, with no prompt) are dropped entirely -- we only care
-  about the input code, not what running it once produced
-- ``.. code-block:: python`` (or ``py``) blocks are kept as-is
-- admonitions such as ``.. note::``/``.. warning::``/``.. seealso::`` become
-  a ``# LABEL:`` comment followed by their content as comments. A "See Also"
-  part is recognized in any of its three forms -- the ``.. seealso::``
-  directive, a bare ``.. rubric:: See Also`` heading, or a hand-written
-  ``See Also`` heading (which docutils nests as its own section,
-  unlike the other two) -- and always renders the same way
-- cross-references and inline code (``:class:``, ``:meth:``, ``:func:``,
-  ``:attr:``, double-backtick literals, ...) keep their display text,
-  wrapped in backticks, e.g. :class:`pyvista.Plotter` -> `pyvista.Plotter`.
-  If ``sphinx_examples_as_code_base_url`` is set and the reference resolves,
-  ``.ipynb`` notebooks turn it into a clickable markdown link everywhere;
-  ``.py`` files only do anything with the link inside a "See Also" part,
-  where the reference is written out as ``name url`` on its own line instead
-  -- everywhere else in ``.py``, the link is simply omitted, same as when
-  no base URL is configured at all
-- plain prose-style references (``:ref:``, ``:doc:``) are treated the same
-  way, minus the backticks (since they're not code-styled to begin with)
-- everything else text-bearing (prose, captions, other non-python code) is
-  turned into a plain ``#`` comment
-- figures/images, raw HTML, and sphinx-design dropdowns/tab-sets are
-  dropped entirely -- not even as a comment
-- RST markup that leaks in unparsed sections such as doctest comments
-  (which docutils never resolves) is cleaned up rather than reproduced verbatim
-
-Generated ``.py`` files start with a title header (``# Examples from
-<qualified name>`` followed by a matching underline), and follow a few
-whitespace conventions so the result reads like normal, human-written
-Python. Prose immediately preceding a code block stays directly above it
-with no blank line, but a code block is always followed by a blank line
-before whatever comes next, and a converted directive (the header, or a
-``# NOTE:``-style block) always gets a blank line both before and after
-it. The file always ends with a trailing blank line.
-
-Generated ``.ipynb`` notebooks use the same underlying content, split into
-alternating cells instead of one flat file: each run of ``code`` segments
-becomes a code cell, and each run of prose/directive segments becomes a
-markdown cell. Adjacent lines within a markdown cell get an explicit hard
-line break (a trailing double space): markdown otherwise treats a single
-newline as just whitespace and runs everything together into one paragraph.
-
-If the resulting code contains at least one real executable statement, a
-download link for it is added to the Examples section.
-
+See the README for configuration options and the full conversion rules.
 """
 
 from __future__ import annotations
@@ -101,13 +24,10 @@ if TYPE_CHECKING:
     from sphinx.application import Sphinx
     from sphinx.config import Config
 
-# Node types that mark a heading (the start of some other section) and
-# therefore bound the end of whatever Examples section precedes them.
-# ``addnodes.desc`` and ``addnodes.index`` are included because numpydoc
-# renders a class's nested members (e.g. ``:members:``) as flat siblings
-# directly inside the *same* ``desc_content`` as the class's own Examples
-# section -- without stopping there, a class's Examples section would
-# swallow all of its methods too.
+# Node types marking the start of another section - bound the end of an
+# Examples span. desc/index are included so a class's Examples section
+# doesn't swallow its members, which numpydoc renders as flat siblings
+# inside the same desc_content.
 _BOUNDARY_TYPES = (
     nodes.rubric,
     nodes.title,
@@ -119,12 +39,10 @@ _BOUNDARY_TYPES = (
 # Node types with no textual content worth keeping under any circumstance.
 _IGNORED_TYPES = (nodes.image, nodes.figure, nodes.comment, nodes.raw)
 
-# sphinx-design containers identified by class name (checked by CSS class
-# rather than node type, so this doesn't require importing sphinx_design and
-# keeps working across its versions). Their entire subtree is dropped: a
-# dropdown's hidden content isn't part of the visible example, and a
-# tab-set's only content in our use case is figures (already ignored) plus
-# tab-label cruft like "Static Scene" / "Interactive Scene".
+# sphinx-design containers, matched by CSS class rather than node type so
+# this doesn't need to import sphinx_design. Dropped entirely: a dropdown's
+# content isn't part of the visible example, and a tab-set here only holds
+# figures (already ignored) plus tab-label cruft.
 _SKIP_SUBTREE_CLASSES = ('sd-dropdown', 'sd-tab-set')
 
 _CONTAINER_TYPES = (
@@ -142,10 +60,8 @@ _CONTAINER_TYPES = (
     addnodes.versionmodified,
 )
 
-# The docutils/Sphinx admonition family (``.. note::``, ``.. warning::``,
-# ``.. seealso::``, etc, all no-title fixed-label admonitions -- as opposed
-# to the generic ``.. admonition:: Custom Title`` directive, handled
-# separately below).
+# Fixed-label admonitions (.. note::, .. warning::, .. seealso::, ...) - as
+# opposed to the generic .. admonition:: Custom Title, handled separately.
 _ADMONITION_LABELS = {
     nodes.attention: 'ATTENTION',
     nodes.caution: 'CAUTION',
@@ -197,13 +113,9 @@ def _is_examples_heading(node: nodes.Node) -> bool:
 def _is_see_also_heading(node: nodes.Node) -> bool:
     r"""Check whether ``node`` is a heading (rubric or title) named "See Also".
 
-    Docstrings write "see also" content two different ways: a
-    ``.. seealso::`` directive (an admonition, handled via
-    ``_ADMONITION_LABELS``), or a hand-written heading -- either a bare
-    ``.. rubric:: See Also`` (a flat sibling, like "Examples" itself), or
-    plain underline-style ``See Also\\n--------`` text, which docutils
-    turns into a full nested ``nodes.section``. Both heading forms get the
-    same treatment as the directive.
+    Two written forms: a bare ``.. rubric:: See Also`` (flat sibling), or
+    ``See Also\\n--------`` underline text (docutils nests it as a section).
+    Both get the same treatment as a ``.. seealso::`` directive.
     """
     return (
         isinstance(node, (nodes.rubric, nodes.title))
@@ -233,11 +145,10 @@ class _RenderContext:
 def _resolve_link_url(node: nodes.reference, ctx: _RenderContext) -> str | None:
     """Resolve a reference node's target to an absolute URL, if possible.
 
-    Returns ``None`` if there's nothing to link to (an unresolved target),
-    or if no base URL is configured -- a downloaded, standalone file needs
-    an absolute URL to be useful, and Sphinx's own ``refuri``/``refid`` on
-    an internal reference are only meaningful relative to the current page
-    (or the current page itself, for a same-page ``refid`` reference).
+    Returns ``None`` for an unresolved target or when no base URL is
+    configured -- a standalone downloaded file needs an absolute URL, and
+    Sphinx's own ``refuri``/``refid`` are only meaningful relative to the
+    current page.
     """
     refuri = node.get('refuri')
     if refuri and urlsplit(refuri).netloc:
@@ -265,12 +176,9 @@ def _add_comment(lines: list[str], text: str) -> None:
         lines.append(f'# {line_}' if line_ else '#')
 
 
-# Docutils never interprets inline markup inside doctest/code-block content
-# (it's preformatted), so RST written in a Python comment there -- a
-# cross-reference role or a hyperlink -- passes straight through as raw
-# text instead of being resolved, unlike the same syntax in ordinary prose
-# (handled by ``_render_inline``). These clean up that raw text when found
-# in a comment line, without ever touching real code.
+# Doctest/code-block content is preformatted, so docutils never resolves
+# RST markup (xref roles, hyperlinks) written inside a comment there - it
+# passes through as raw text. These clean it up without touching real code.
 _STRAY_XREF_RE = re.compile(r':(?:py:)?\w+:`([^`<>]+?)\s*(?:<[^<>]+>)?`')
 _STRAY_HYPERLINK_RE = re.compile(r'`([^`<>]+?)\s*(?:<([^`<>]+)>)?`_+')
 
@@ -294,14 +202,9 @@ def _clean_code_comment(line: str) -> str:
 def _render_reference(node: nodes.reference, ctx: _RenderContext) -> str:
     """Render a resolved or unresolved cross-reference/hyperlink.
 
-    Code-styled refs (``:class:``/``:meth:``/``:func:``/``:attr:``,
-    wrapping a ``literal``) and plain prose-style refs (``:ref:``/``:doc:``,
-    or an external hyperlink) both land here so their target URL --
-    resolved via ``sphinx_examples_as_code_base_url`` -- can be used: as a
-    clickable markdown link in notebooks (always), and as literal URL text
-    in ``.py`` Examples sections (only within a "See Also" part; everywhere
-    else in ``.py``, the link is simply omitted, same as before this
-    feature existed).
+    The target URL, if resolved, is used as a clickable markdown link in
+    notebooks (always), and as literal URL text in ``.py`` (only within a
+    "See Also" part -- elsewhere in ``.py`` the link is simply omitted).
     """
     display = node.astext()
     is_code = any(isinstance(child, nodes.literal) for child in node.children)
@@ -314,9 +217,8 @@ def _render_reference(node: nodes.reference, ctx: _RenderContext) -> str:
         return f'[`{display}`]({url})' if is_code else f'[{display}]({url})'
 
     if ctx.in_see_also:
-        # Set off on its own comment line by the surrounding newlines;
-        # _add_comment splits on them the same way it splits any other
-        # multi-line text.
+        # Surrounding newlines set this off on its own line; _add_comment
+        # splits on them like any other multi-line text.
         return f'\n{display} {url}\n'
 
     return f'`{display}`' if is_code else display
@@ -325,11 +227,9 @@ def _render_reference(node: nodes.reference, ctx: _RenderContext) -> str:
 def _render_inline(node: nodes.Node, ctx: _RenderContext) -> str:
     """Render a node's inline content to a plain string.
 
-    ``nodes.reference`` (a cross-reference or hyperlink) is handled by
-    ``_render_reference``. Any other code-like span -- a plain
-    double-backtick literal, or an unresolved reference's inner literal --
-    is wrapped in backticks using just its display text. Any other inline
-    formatting (emphasis, strong, ...) is flattened to plain text.
+    References go through ``_render_reference``. Other code-like spans
+    (double-backtick literals, an unresolved reference's inner literal) are
+    backtick-wrapped; everything else is flattened to plain text.
     """
     if isinstance(node, nodes.reference):
         return _render_reference(node, ctx)
@@ -435,10 +335,9 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
     if type(node) in _ADMONITION_LABELS:
         return _convert_admonition(node, _ADMONITION_LABELS[type(node)], ctx)
     if _is_see_also_section(node):
-        # a hand-written "See Also\n--------" heading: docutils nests it
-        # (and everything after it, until the next same-level heading) as
-        # a full section rather than a flat sibling -- treat it exactly
-        # like the ``.. seealso::`` directive it's standing in for.
+        # a hand-written "See Also\n--------" heading nests as a full
+        # section rather than a flat sibling - treat it like the
+        # ``.. seealso::`` directive it's standing in for.
         return _convert_admonition(node, 'SEE ALSO', ctx, skip_first_title=True)
     if isinstance(node, nodes.admonition):
         # generic ``.. admonition:: Custom Title`` - use its own title as the label
@@ -477,11 +376,9 @@ def _has_real_code(source: str) -> bool:
 def _span_from(parent: nodes.Element, start: int) -> int:
     """Return the end index (exclusive) of a content span starting at ``start``.
 
-    The span extends until (but excludes) the next boundary-type node, or to
-    the end of ``parent``'s children. A "See Also" heading or nested section
-    (see ``_is_see_also_heading``/``_is_see_also_section``) is *not* treated
-    as a boundary: without this, a hand-written "See Also" heading partway
-    through an Examples section would silently truncate everything after it.
+    Extends until the next boundary-type node, or to the end of ``parent``'s
+    children. A "See Also" heading/section is not a boundary -- otherwise it
+    would truncate everything after it.
     """
     end = start
     for i in range(start, len(parent.children)):
@@ -498,10 +395,8 @@ def _span_from(parent: nodes.Element, start: int) -> int:
 def _find_external_see_also(parent: nodes.Element, start: int, end: int) -> nodes.Node | None:
     """Find a "See Also" part sited outside the normal ``[start, end)`` span.
 
-    numpydoc's own "See Also" field -- as opposed to a ``.. seealso::``
-    directive a maintainer writes directly inside their Examples text,
-    which stays within the normal span -- gets canonically reordered to
-    sit *before* "Examples", so it would otherwise never be seen at all.
+    numpydoc's own "See Also" field is canonically reordered to sit before
+    "Examples", so it would otherwise never be seen at all.
     """
     for i, child in enumerate(parent.children):
         if start <= i < end:
@@ -553,13 +448,11 @@ def _strip_comment_prefix(line: str) -> str:
 
 
 def _segments_to_cells(segments: list[Segment]) -> list[tuple[str, list[str]]]:
-    """Group segments into notebook cells: consecutive runs of ``('code' | 'markdown', lines)``.
+    """Group segments into notebook cells: consecutive runs become one cell each.
 
-    A run of ``code`` segments becomes one code cell; a run of ``text``/
-    ``directive`` segments becomes one markdown cell, joined with the same
-    blank-line rules as ``_join_segments`` (so a directive still gets blank
-    lines around it) and with the ``#`` comment prefix stripped from each
-    line, since markdown needs no such marker.
+    A run of ``code`` segments becomes a code cell; a run of ``text``/
+    ``directive`` segments becomes a markdown cell (same spacing rules as
+    ``_join_segments``, with the ``#`` prefix stripped).
     """
     cells: list[tuple[str, list[str]]] = []
     run: list[Segment] = []
@@ -593,12 +486,9 @@ def _segments_to_cells(segments: list[Segment]) -> list[tuple[str, list[str]]]:
 def _cell_source(lines: list[str], kind: str) -> list[str]:
     r"""Format lines the way nbformat expects: each ending in ``\\n`` but the last.
 
-    Markdown cells get a trailing hard line break (two spaces) appended to
-    each non-blank line: without it, adjacent lines in the same cell (e.g.
-    the header and its underline, or two "See Also" entries) collapse into
-    one run-together paragraph when rendered, since markdown only breaks
-    lines on a blank line or an explicit hard break -- a single newline is
-    just whitespace.
+    Markdown cells get a trailing hard line break (two spaces) on each
+    non-blank line -- otherwise adjacent lines collapse into one paragraph,
+    since markdown treats a single newline as plain whitespace.
     """
     if not lines:
         return []
@@ -640,19 +530,15 @@ def _build_notebook(cells: list[tuple[str, list[str]]]) -> dict:
 def _write_download_file(app: Sphinx, name: str, extension: str, content: str) -> str:
     """Write generated content directly into the builder's downloads dir.
 
-    Returns the path of the written file, relative to the downloads
-    directory (i.e. the value to use as a ``download_reference``'s
-    ``filename`` attribute).
+    Returns the written file's path relative to the downloads directory --
+    the value to use as a ``download_reference``'s ``filename``.
 
-    Note: this writes straight to ``<outdir>/_downloads/...`` instead of
-    registering through ``env.dlfiles``, because the HTML builder's
-    ``copy_download_files`` task (which copies everything registered in
-    ``env.dlfiles``) runs during ``copy_assets()`` -- *before* any
-    ``doctree-resolved`` handler (this one included) gets a chance to run.
-    Registering through ``env.dlfiles`` here would silently be too late.
+    Writes straight to ``<outdir>/_downloads/...`` instead of registering
+    through ``env.dlfiles``, because the HTML builder copies those files
+    during ``copy_assets()`` -- before any ``doctree-resolved`` handler
+    (this one included) runs, so registering here would be too late.
     """
-    # 32 hex characters, matching the digest length Sphinx's own native
-    # download-file handling uses for its ``_downloads/<digest>/...`` layout.
+    # 32 hex chars, matching Sphinx's own native _downloads/<digest>/... layout.
     digest = hashlib.sha256(content.encode()).hexdigest()[:32]
     safe_name = name.replace('.', '_') if name else 'example'
     filename = f'{safe_name}.{extension}'
@@ -699,11 +585,9 @@ def _make_download_node(entries: list[tuple[str, str]]) -> nodes.paragraph:
 def _build_segments(nodes_in_span: list[nodes.Node], ctx: _RenderContext) -> list[Segment]:
     """Convert a span's nodes into segments.
 
-    A bare ``.. rubric:: See Also`` heading (a flat sibling, like "Examples"
-    itself) isn't wrapped in anything the way ``.. seealso::`` or a nested
-    "See Also" section are, so this gathers everything after it itself,
-    into one merged directive segment -- the same as those other two forms
-    produce via ``_convert_admonition``.
+    A bare ``.. rubric:: See Also`` heading isn't wrapped in a container the
+    way ``.. seealso::`` or a nested section are, so this gathers everything
+    after it into one merged directive segment instead.
     """
     segments: list[Segment] = []
     for i, node in enumerate(nodes_in_span):
@@ -771,19 +655,16 @@ def _process_span(
 def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None:
     """Add a download link to every "Examples" section found on this page."""
     if not getattr(app.builder, 'download_support', False):
-        # Only HTML-family builders (html, dirhtml, singlehtml, ...) know how
-        # to serve a ``_downloads/`` directory. Skip everything else (latex,
-        # text, man, epub, ...) rather than writing files nobody can reach.
+        # Only HTML-family builders serve a _downloads/ directory - skip
+        # everything else (latex, text, man, epub, ...).
         return
 
     position = app.config.sphinx_examples_as_code_link_position
     formats = app.config.sphinx_examples_as_code_formats
 
-    # Process spans, per shared parent, from last to first: inserting a
-    # download-link node shifts every later sibling index by one, so a
-    # page with more than one Examples heading under the same parent (an
-    # unusual but possible structure) stays correct regardless of whether
-    # each link lands at the start or the end of its own span.
+    # Process spans per shared parent, last to first: inserting a download
+    # node shifts every later sibling index by one, so this stays correct
+    # even with multiple Examples headings under one parent.
     spans = _examples_spans(doctree)
     numbered_spans = [(*span, i + 1) for i, span in enumerate(spans)]
     for parent, start, end, heading, counter in sorted(
@@ -795,13 +676,9 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
 def _validate_base_url(_app: Sphinx, config: Config) -> None:
     """Validate and normalize ``sphinx_examples_as_code_base_url``.
 
-    Catches the two most common typos loudly instead of silently
-    generating wrong links throughout the whole build: a missing scheme
-    (``docs.example.com`` instead of ``https://docs.example.com``) parses
-    with no scheme *and* no netloc at all, and a base URL with a subpath
-    but no trailing slash (``.../en/stable`` instead of ``.../en/stable/``)
-    makes ``urljoin`` silently drop the last path segment when resolving
-    links. No network access is used or needed -- this only checks shape.
+    Catches two common typos loudly instead of silently generating wrong
+    links: a missing scheme (parses with no netloc at all), and a subpath
+    with no trailing slash (``urljoin`` would drop the last segment).
     """
     base_url = config.sphinx_examples_as_code_base_url
     if not base_url:
