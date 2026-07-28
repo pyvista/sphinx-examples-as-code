@@ -514,3 +514,46 @@ def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     header_cell = next(c for c in notebook['cells'] if c['cell_type'] == 'markdown')
     assert header_cell['source'][0].endswith('  \n')
+
+
+def test_base_url_missing_scheme_fails_build(tmp_path: Path):
+    """A base URL typo (no scheme) should fail the build immediately.
+
+    Rather than silently generating broken links throughout it.
+    """
+    html_dir = tmp_path / 'html'
+    doctree_dir = tmp_path / 'doctrees'
+    returncode, _out, err = _run_sphinx_build(
+        _sphinx_build_cmd(
+            SRCDIR,
+            html_dir,
+            doctree_dir,
+            ('-D', 'sphinx_examples_as_code_base_url=docs.example.com/'),
+        ),
+    )
+    assert returncode != 0
+    assert 'does not look like a valid absolute URL' in err
+
+
+def test_base_url_missing_trailing_slash_still_resolves_subpath(tmp_path: Path):
+    """A base URL with a subpath but no trailing slash should be normalized.
+
+    Rather than silently dropping the last path segment.
+    """
+    html_dir = tmp_path / 'html'
+    doctree_dir = tmp_path / 'doctrees'
+    returncode, out, err = _run_sphinx_build(
+        _sphinx_build_cmd(
+            SRCDIR,
+            html_dir,
+            doctree_dir,
+            ('-D', 'sphinx_examples_as_code_base_url=https://docs.example.com/en/stable'),
+        ),
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+
+    nb_path = next(
+        (html_dir / '_downloads').rglob('docstring_cases_case_regular_xref_for_base_url.ipynb')
+    )
+    nb_text = nb_path.read_text(encoding='utf-8')
+    assert 'https://docs.example.com/en/stable/docstring_cases.html' in nb_text
