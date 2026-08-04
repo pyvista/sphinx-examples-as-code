@@ -296,7 +296,8 @@ def _convert_doctest_block(node: nodes.doctest_block) -> list[Segment]:
 def _convert_literal_block(node: nodes.literal_block) -> list[Segment]:
     """Convert a ``.. code-block::``. Python blocks stay code, others become comments."""
     language = node.get('language', '')
-    if language in _PYTHON_LANGUAGES:
+    # Case-insensitive: sphinx-gallery emits ``.. code-block:: Python`` (capitalized).
+    if language.lower() in _PYTHON_LANGUAGES:
         lines = [_clean_code_comment(line) for line in node.astext().splitlines()]
         while lines and not lines[-1].strip():
             lines.pop()

@@ -353,6 +353,15 @@ def test_convert_literal_block_python():
     assert segments == [('code', ['x = 1'])]
 
 
+def test_convert_literal_block_capitalized_python():
+    # sphinx-gallery emits ``.. code-block:: Python`` (capitalized) -- the
+    # language match must not be case-sensitive, or gallery code blocks
+    # would silently turn into comments instead of staying real code.
+    node = nodes.literal_block('', 'x = 1')
+    node['language'] = 'Python'
+    assert seac._convert_literal_block(node) == [('code', ['x = 1'])]
+
+
 def test_convert_literal_block_non_python_becomes_comment():
     node = nodes.literal_block('', 'echo hi')
     node['language'] = 'bash'
