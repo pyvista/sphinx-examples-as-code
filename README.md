@@ -50,7 +50,7 @@ What happens to the content of an Examples section:
   Also` heading) and always renders the same way.
 - Cross-references and inline code (`:class:`, `:meth:`, `:func:`, `:attr:`,
   double-backtick literals, ...) keep their display text, wrapped in backticks (e.g.
-  `:class:\`pyvista.Plotter\`` -> `` `pyvista.Plotter` ``). If `..._base_url` is set and
+  ``:class:`pyvista.Plotter` `` -> `` `pyvista.Plotter` ``). If `..._base_url` is set and
   the reference resolves: `.ipynb` turns it into a clickable link everywhere; `.py` only
   writes the link inside a "See Also" part (as `name url` on its own line) — everywhere
   else in `.py` the link is simply omitted.
