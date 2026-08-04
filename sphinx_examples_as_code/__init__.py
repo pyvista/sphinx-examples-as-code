@@ -603,6 +603,49 @@ def _build_segments(nodes_in_span: list[nodes.Node], ctx: _RenderContext) -> lis
     return segments
 
 
+def _build_download_entries(
+    app: Sphinx,
+    docname: str,
+    name: str,
+    nodes_in_span: list[nodes.Node],
+    formats: list[str],
+) -> list[tuple[str, str]]:
+    """Convert a span of nodes into written ``.py``/``.ipynb`` files, per ``formats``.
+
+    Returns ``(label, rel_path)`` entries for whichever formats are
+    requested -- empty if the span has no real code, or ``formats`` itself
+    is empty. Shared by the docstring-Examples path and gallery-page path;
+    the only difference between them is how ``nodes_in_span`` and ``name``
+    get built.
+    """
+    py_ctx = _RenderContext(app=app, docname=docname, fmt='py')
+    py_segments = _build_segments(nodes_in_span, py_ctx)
+
+    if not any(kind == 'code' for kind, _lines in py_segments):
+        return []
+
+    source = '\n'.join(_join_segments([_header_segment(name), *py_segments])).rstrip() + '\n\n'
+
+    if not _has_real_code(source):
+        return []
+
+    entries = []
+    for fmt in _FORMAT_ORDER:
+        if fmt not in formats:
+            continue
+        label = _FORMAT_LABELS[fmt]
+        if fmt == 'py':
+            rel_path = _write_source(app, name, source)
+        else:
+            ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
+            ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
+            cells = _segments_to_cells([_header_segment(name), *ipynb_segments])
+            rel_path = _write_notebook(app, name, _build_notebook(cells))
+        entries.append((label, rel_path))
+
+    return entries
+
+
 def _process_span(
     app: Sphinx,
     docname: str,
@@ -620,32 +663,8 @@ def _process_span(
     if external_see_also is not None:
         nodes_in_span.append(external_see_also)
 
-    py_ctx = _RenderContext(app=app, docname=docname, fmt='py')
-    py_segments = _build_segments(nodes_in_span, py_ctx)
-
-    if not any(kind == 'code' for kind, _lines in py_segments):
-        return
-
     name = _qualified_name_for(heading, docname, counter)
-    source = '\n'.join(_join_segments([_header_segment(name), *py_segments])).rstrip() + '\n\n'
-
-    if not _has_real_code(source):
-        return
-
-    entries = []
-    for fmt in _FORMAT_ORDER:
-        if fmt not in formats:
-            continue
-        label = _FORMAT_LABELS[fmt]
-        if fmt == 'py':
-            rel_path = _write_source(app, name, source)
-        else:
-            ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
-            ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
-            cells = _segments_to_cells([_header_segment(name), *ipynb_segments])
-            rel_path = _write_notebook(app, name, _build_notebook(cells))
-        entries.append((label, rel_path))
-
+    entries = _build_download_entries(app, docname, name, nodes_in_span, formats)
     if not entries:
         return
 
