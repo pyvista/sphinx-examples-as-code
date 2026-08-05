@@ -36,7 +36,7 @@ def _ctx(
 ):
     """Build a minimal ``_RenderContext`` with a mocked Sphinx app."""
     app = Mock()
-    app.config.sphinx_examples_as_code_base_url = base_url
+    app.config.sphinx_examples_as_code_conf = {'base_url': base_url}
     app.builder.get_target_uri.side_effect = lambda d: f'{d}.html'
     return seac._RenderContext(app=app, docname=docname, fmt=fmt, in_see_also=in_see_also)
 
@@ -977,8 +977,11 @@ def test_process_doctree_skips_when_no_download_support():
 def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected_index: int):
     app = Mock(outdir=str(tmp_path))
     app.builder.download_support = True
-    app.config.sphinx_examples_as_code_link_position = position
-    app.config.sphinx_examples_as_code_formats = ['py', 'ipynb']
+    app.config.sphinx_examples_as_code_conf = {
+        'link_position': position,
+        'formats': ['py', 'ipynb'],
+        'gallery_downloads': False,
+    }
 
     doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
 
@@ -992,19 +995,15 @@ def test_setup_registers_connect_and_config():
     app = Mock()
     result = seac.setup(app)
     app.connect.assert_any_call('doctree-resolved', seac._process_doctree)
-    app.connect.assert_any_call('config-inited', seac._validate_base_url)
-    assert app.add_config_value.call_count == 4
-    app.add_config_value.assert_any_call('sphinx_examples_as_code_link_position', 'top', 'env')
-    app.add_config_value.assert_any_call('sphinx_examples_as_code_formats', ['py', 'ipynb'], 'env')
-    app.add_config_value.assert_any_call('sphinx_examples_as_code_base_url', None, 'env')
-    app.add_config_value.assert_any_call('sphinx_examples_as_code_gallery_downloads', False, 'env')
+    app.connect.assert_any_call('config-inited', seac._finalize_conf)
+    app.add_config_value.assert_called_once_with('sphinx_examples_as_code_conf', {}, 'env')
     assert result['version'] == seac.__version__
     assert result['parallel_read_safe'] is True
     assert result['parallel_write_safe'] is True
 
 
 # ---------------------------------------------------------------------------
-# sphinx-gallery integration (sphinx_examples_as_code_gallery_downloads)
+# sphinx-gallery integration (sphinx_examples_as_code_conf['gallery_downloads'])
 #
 # Node shapes below mirror a real sphinx-gallery build, confirmed by
 # building one with sphinx-gallery installed and dumping its doctree --
@@ -1219,9 +1218,11 @@ def test_process_gallery_page_no_real_code_strips_furniture_but_no_download(tmp_
 def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     app.builder.download_support = True
-    app.config.sphinx_examples_as_code_link_position = 'bottom'
-    app.config.sphinx_examples_as_code_formats = ['py']
-    app.config.sphinx_examples_as_code_gallery_downloads = False
+    app.config.sphinx_examples_as_code_conf = {
+        'link_position': 'bottom',
+        'formats': ['py'],
+        'gallery_downloads': False,
+    }
 
     doctree = _build_gallery_doctree()
     seac._process_doctree(app, doctree, 'plot_minimal')
@@ -1234,9 +1235,11 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
 def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     app.builder.download_support = True
-    app.config.sphinx_examples_as_code_link_position = 'bottom'
-    app.config.sphinx_examples_as_code_formats = ['py']
-    app.config.sphinx_examples_as_code_gallery_downloads = True
+    app.config.sphinx_examples_as_code_conf = {
+        'link_position': 'bottom',
+        'formats': ['py'],
+        'gallery_downloads': True,
+    }
 
     doctree = _build_gallery_doctree()
     seac._process_doctree(app, doctree, 'plot_minimal')
@@ -1246,50 +1249,150 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# _validate_base_url
+# _normalize_base_url
 # ---------------------------------------------------------------------------
 
 
-def test_validate_base_url_none_is_a_no_op():
-    config = Mock(sphinx_examples_as_code_base_url=None)
-    seac._validate_base_url(Mock(), config)
-    assert config.sphinx_examples_as_code_base_url is None
+def test_normalize_base_url_none_is_a_no_op():
+    assert seac._normalize_base_url(None) is None
 
 
-def test_validate_base_url_missing_scheme_raises():
-    config = Mock(sphinx_examples_as_code_base_url='docs.example.com/')
+def test_normalize_base_url_empty_string_is_a_no_op():
+    assert seac._normalize_base_url('') is None
+
+
+def test_normalize_base_url_missing_scheme_raises():
     with pytest.raises(ConfigError, match='does not look like a valid absolute URL'):
-        seac._validate_base_url(Mock(), config)
+        seac._normalize_base_url('docs.example.com/')
 
 
-def test_validate_base_url_garbage_raises():
-    config = Mock(sphinx_examples_as_code_base_url='not a url at all')
+def test_normalize_base_url_garbage_raises():
     with pytest.raises(ConfigError):
-        seac._validate_base_url(Mock(), config)
+        seac._normalize_base_url('not a url at all')
 
 
-def test_validate_base_url_non_http_scheme_raises():
-    config = Mock(sphinx_examples_as_code_base_url='ftp://docs.example.com/')
+def test_normalize_base_url_non_http_scheme_raises():
     with pytest.raises(ConfigError):
-        seac._validate_base_url(Mock(), config)
+        seac._normalize_base_url('ftp://docs.example.com/')
 
 
-def test_validate_base_url_adds_missing_trailing_slash():
-    config = Mock(sphinx_examples_as_code_base_url='https://docs.example.com/en/stable')
-    seac._validate_base_url(Mock(), config)
-    assert config.sphinx_examples_as_code_base_url == 'https://docs.example.com/en/stable/'
+def test_normalize_base_url_adds_missing_trailing_slash():
+    assert (
+        seac._normalize_base_url('https://docs.example.com/en/stable')
+        == 'https://docs.example.com/en/stable/'
+    )
 
 
-def test_validate_base_url_leaves_trailing_slash_alone():
-    config = Mock(sphinx_examples_as_code_base_url='https://docs.example.com/en/stable/')
-    seac._validate_base_url(Mock(), config)
-    assert config.sphinx_examples_as_code_base_url == 'https://docs.example.com/en/stable/'
+def test_normalize_base_url_leaves_trailing_slash_alone():
+    assert (
+        seac._normalize_base_url('https://docs.example.com/en/stable/')
+        == 'https://docs.example.com/en/stable/'
+    )
 
 
-def test_validate_base_url_bare_domain_gets_trailing_slash():
-    config = Mock(sphinx_examples_as_code_base_url='https://docs.example.com')
-    seac._validate_base_url(Mock(), config)
-    assert config.sphinx_examples_as_code_base_url == 'https://docs.example.com/'
+def test_normalize_base_url_bare_domain_gets_trailing_slash():
+    assert seac._normalize_base_url('https://docs.example.com') == 'https://docs.example.com/'
+
+
+# ---------------------------------------------------------------------------
+# _coerce_conf_value
+# ---------------------------------------------------------------------------
+
+
+def test_coerce_conf_value_non_string_passes_through():
+    # already the real type (set directly in conf.py) -- untouched
+    assert seac._coerce_conf_value('formats', ['py']) == ['py']
+    assert seac._coerce_conf_value('gallery_downloads', True) is True
+
+
+def test_coerce_conf_value_formats_splits_on_comma():
+    assert seac._coerce_conf_value('formats', 'py,ipynb') == ['py', 'ipynb']
+
+
+def test_coerce_conf_value_formats_single_value_no_comma():
+    assert seac._coerce_conf_value('formats', 'py') == ['py']
+
+
+@pytest.mark.parametrize(('raw', 'expected'), [('0', False), ('1', True)])
+def test_coerce_conf_value_gallery_downloads_bool_strings(raw: str, expected: bool):
+    assert seac._coerce_conf_value('gallery_downloads', raw) is expected
+
+
+def test_coerce_conf_value_gallery_downloads_invalid_string_raises():
+    with pytest.raises(ConfigError, match="must be '0' or '1'"):
+        seac._coerce_conf_value('gallery_downloads', 'yes')
+
+
+def test_coerce_conf_value_link_position_string_passes_through():
+    assert seac._coerce_conf_value('link_position', 'bottom') == 'bottom'
+
+
+def test_coerce_conf_value_base_url_string_passes_through():
+    assert seac._coerce_conf_value('base_url', 'https://example.com/') == 'https://example.com/'
+
+
+# ---------------------------------------------------------------------------
+# _finalize_conf
+# ---------------------------------------------------------------------------
+
+
+def test_finalize_conf_empty_dict_fills_in_all_defaults():
+    config = Mock(sphinx_examples_as_code_conf={})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf == seac._CONF_DEFAULTS
+
+
+def test_finalize_conf_partial_dict_keeps_the_rest_default():
+    config = Mock(sphinx_examples_as_code_conf={'link_position': 'bottom'})
+    seac._finalize_conf(Mock(), config)
+    conf = config.sphinx_examples_as_code_conf
+    assert conf['link_position'] == 'bottom'
+    assert conf['formats'] == ['py', 'ipynb']
+    assert conf['base_url'] is None
+    assert conf['gallery_downloads'] is False
+
+
+def test_finalize_conf_unknown_key_raises():
+    config = Mock(sphinx_examples_as_code_conf={'link_postion': 'bottom'})  # typo
+    with pytest.raises(ConfigError, match=r'unknown key\(s\).*link_postion'):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_unknown_key_error_lists_valid_keys():
+    config = Mock(sphinx_examples_as_code_conf={'nope': 1})
+    with pytest.raises(ConfigError, match='base_url'):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_coerces_cli_override_style_strings():
+    # what a ``-D sphinx_examples_as_code_conf.key=value`` override looks
+    # like by the time it reaches config-inited -- see _coerce_conf_value
+    config = Mock(sphinx_examples_as_code_conf={'formats': 'py,ipynb', 'gallery_downloads': '1'})
+    seac._finalize_conf(Mock(), config)
+    conf = config.sphinx_examples_as_code_conf
+    assert conf['formats'] == ['py', 'ipynb']
+    assert conf['gallery_downloads'] is True
+
+
+def test_finalize_conf_normalizes_base_url():
+    config = Mock(sphinx_examples_as_code_conf={'base_url': 'https://docs.example.com'})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['base_url'] == 'https://docs.example.com/'
+
+
+def test_finalize_conf_invalid_base_url_raises():
+    config = Mock(sphinx_examples_as_code_conf={'base_url': 'not a url'})
+    with pytest.raises(ConfigError, match='does not look like a valid absolute URL'):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_does_not_mutate_the_defaults():
+    # a regression guard for accidentally sharing/mutating _CONF_DEFAULTS
+    # across builds instead of writing a fresh merged dict each time
+    original = dict(seac._CONF_DEFAULTS)
+    config = Mock(sphinx_examples_as_code_conf={'link_position': 'bottom'})
+    seac._finalize_conf(Mock(), config)
+    assert original == seac._CONF_DEFAULTS
 
 
 # ---------------------------------------------------------------------------

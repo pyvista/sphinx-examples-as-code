@@ -314,7 +314,7 @@ def test_stray_markup_in_doctest_comment_cleaned(built: tuple[Path, list[Path]])
 
 
 def test_link_position_config(tmp_path: Path):
-    """``sphinx_examples_as_code_link_position`` moves the link within its section.
+    """``sphinx_examples_as_code_conf['link_position']`` moves the link within its section.
 
     Default is ``'top'`` (already covered by every other test in this
     module, where the link always precedes the code); this checks ``'bottom'``.
@@ -323,7 +323,10 @@ def test_link_position_config(tmp_path: Path):
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(
         _sphinx_build_cmd(
-            SRCDIR, html_dir, doctree_dir, ('-D', 'sphinx_examples_as_code_link_position=bottom')
+            SRCDIR,
+            html_dir,
+            doctree_dir,
+            ('-D', 'sphinx_examples_as_code_conf.link_position=bottom'),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
@@ -340,7 +343,7 @@ def test_link_position_config(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# .ipynb notebook generation and the sphinx_examples_as_code_formats config option
+# .ipynb notebook generation and the sphinx_examples_as_code_conf['formats'] option
 # ---------------------------------------------------------------------------
 
 
@@ -412,12 +415,15 @@ def test_formats_config_selection(
     expect_py: bool,
     expect_ipynb: bool,
 ):
-    """``sphinx_examples_as_code_formats`` controls which download(s) get generated."""
+    """``sphinx_examples_as_code_conf['formats']`` controls which download(s) get generated."""
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(
         _sphinx_build_cmd(
-            SRCDIR, html_dir, doctree_dir, ('-D', f'sphinx_examples_as_code_formats={formats}')
+            SRCDIR,
+            html_dir,
+            doctree_dir,
+            ('-D', f'sphinx_examples_as_code_conf.formats={formats}'),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
@@ -435,7 +441,7 @@ def test_formats_config_selection(
 
 
 # ---------------------------------------------------------------------------
-# sphinx_examples_as_code_base_url and See Also link resolution
+# sphinx_examples_as_code_conf['base_url'] and See Also link resolution
 # ---------------------------------------------------------------------------
 
 
@@ -469,7 +475,7 @@ def test_base_url_set_resolves_links(tmp_path: Path):
             SRCDIR,
             html_dir,
             doctree_dir,
-            ('-D', 'sphinx_examples_as_code_base_url=https://docs.example.com/'),
+            ('-D', 'sphinx_examples_as_code_conf.base_url=https://docs.example.com/'),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
@@ -528,7 +534,7 @@ def test_base_url_missing_scheme_fails_build(tmp_path: Path):
             SRCDIR,
             html_dir,
             doctree_dir,
-            ('-D', 'sphinx_examples_as_code_base_url=docs.example.com/'),
+            ('-D', 'sphinx_examples_as_code_conf.base_url=docs.example.com/'),
         ),
     )
     assert returncode != 0
@@ -547,7 +553,7 @@ def test_base_url_missing_trailing_slash_still_resolves_subpath(tmp_path: Path):
             SRCDIR,
             html_dir,
             doctree_dir,
-            ('-D', 'sphinx_examples_as_code_base_url=https://docs.example.com/en/stable'),
+            ('-D', 'sphinx_examples_as_code_conf.base_url=https://docs.example.com/en/stable'),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
