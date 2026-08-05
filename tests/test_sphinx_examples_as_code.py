@@ -998,6 +998,7 @@ def test_setup_registers_connect_and_config():
     app.add_config_value.assert_any_call('sphinx_examples_as_code_formats', ['py', 'ipynb'], 'env')
     app.add_config_value.assert_any_call('sphinx_examples_as_code_base_url', None, 'env')
     app.add_config_value.assert_any_call('sphinx_examples_as_code_gallery_downloads', False, 'env')
+    assert result['version'] == seac.__version__
     assert result['parallel_read_safe'] is True
     assert result['parallel_write_safe'] is True
 
