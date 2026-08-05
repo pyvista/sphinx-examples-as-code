@@ -164,6 +164,22 @@ def test_gallery_downloads_py_content(gallery_build: tuple[Path, str]):
         assert marker not in src
 
 
+def test_gallery_downloads_sibling_section_heading_is_set_off(gallery_build: tuple[Path, str]):
+    """The sibling section's own heading gets underline + blank-line treatment.
+
+    Not plain comment text melting into the prose that follows it -- matches
+    the file's own header style (see the .ipynb counterpart below, where the
+    same underline is what makes it render as a real Markdown heading).
+    """
+    html_dir, _html = gallery_build
+    lines = _generated(html_dir, '.py').read_text(encoding='utf-8').splitlines()
+
+    heading_idx = lines.index('# A headed cell')
+    assert lines[heading_idx - 1] == ''  # blank line before the heading
+    assert lines[heading_idx + 1] == '# ' + '-' * len('A headed cell')
+    assert lines[heading_idx + 2] == ''  # blank line after the heading
+
+
 def test_gallery_downloads_ipynb_is_valid(gallery_build: tuple[Path, str]):
     html_dir, _html = gallery_build
     nb_path = _generated(html_dir, '.ipynb')
@@ -175,6 +191,21 @@ def test_gallery_downloads_ipynb_is_valid(gallery_build: tuple[Path, str]):
     assert 'x = 1' in all_source
     assert 'print(x + y)' in all_source
     assert 'z = 3' in all_source  # from the sibling ("# %%" headed) section
+
+
+def test_gallery_downloads_sibling_section_heading_is_markdown_in_ipynb(
+    gallery_build: tuple[Path, str],
+):
+    """The same underline treatment is what makes it a real Markdown heading here."""
+    html_dir, _html = gallery_build
+    notebook = json.loads(_generated(html_dir, '.ipynb').read_text(encoding='utf-8'))
+    heading_cell = next(
+        c
+        for c in notebook['cells']
+        if c['cell_type'] == 'markdown' and 'A headed cell' in ''.join(c['source'])
+    )
+    source = ''.join(heading_cell['source'])
+    assert '-' * len('A headed cell') in source  # setext underline
 
 
 def test_gallery_downloads_generated_py_executes(gallery_build: tuple[Path, str]):

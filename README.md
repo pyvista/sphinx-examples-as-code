@@ -73,7 +73,9 @@ What happens to the content of an Examples section:
 - Doctest blocks (`>>> ...` / `... ...`) keep their input lines, prompts stripped, as
   real Python source. Doctest *output* lines are dropped — only the input code matters.
 - `.. code-block:: python` (or `py`) blocks are kept as-is; other languages become
-  comments.
+  comments, set off with blank lines on both sides like any other directive -- so a
+  preformatted block (e.g. an RST `::`-block illustrating a data format) still reads as
+  a distinct block rather than melting into the surrounding prose.
 - Admonitions (`.. note::`, `.. warning::`, `.. seealso::`, ...) become a `# LABEL:`
   comment followed by their content as comments. "See Also" is recognized in any of its
   three forms (`.. seealso::`, a bare `.. rubric:: See Also`, or a hand-written `See
@@ -88,7 +90,9 @@ What happens to the content of an Examples section:
   backticks.
 - Everything else text-bearing (prose, captions, other non-Python code) becomes a plain
   `#` comment.
-- Figures/images, raw HTML, and sphinx-design dropdowns/tab-sets are dropped entirely.
+- Figures/images, raw HTML, sphinx-design dropdowns/tab-sets, and sphinx-tags' `.. tags::`
+  line are dropped entirely -- none of them are documentation content a downloaded,
+  standalone file has any use for.
 
 Generated `.py` files start with a `# Examples from <qualified name>` title header and
 follow a few whitespace conventions so the result reads like normal Python: prose
@@ -121,6 +125,10 @@ Detection is automatic and per-page — any page without a sphinx-gallery downlo
 is left completely untouched, so turning this on is safe even on a site that mixes
 gallery pages with ordinary docstring/prose pages using the Examples-section behavior
 above.
+
+A `# %%` cell with its own RST heading gets the same title-plus-underline treatment as
+the file's own header, rather than melting into whatever prose follows it -- and for
+that reason renders as a real Markdown heading in `.ipynb`, not just plain text.
 
 Two things worth knowing before turning this on:
 
