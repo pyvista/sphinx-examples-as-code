@@ -173,7 +173,7 @@ def _resolve_link_url(node: nodes.reference, ctx: _RenderContext) -> str | None:
     if refuri and urlsplit(refuri).netloc:
         return refuri  # already absolute (an external hyperlink)
 
-    base_url = ctx.app.config.sphinx_examples_as_code_base_url
+    base_url = ctx.app.config.sphinx_examples_as_code_conf['base_url']
     if not base_url:
         return None
     current_page_url = urljoin(base_url, ctx.app.builder.get_target_uri(ctx.docname))
@@ -581,7 +581,7 @@ def _write_notebook(app: Sphinx, name: str, notebook: dict) -> str:
 
 
 #: Download link text per format, and the fixed order they're offered in
-#: regardless of how ``sphinx_examples_as_code_formats`` lists them.
+#: regardless of how ``sphinx_examples_as_code_conf['formats']`` lists them.
 _FORMAT_LABELS = {
     'py': 'Download Python source code',
     'ipynb': 'Download Jupyter notebook',
@@ -692,7 +692,7 @@ def _process_span(
 
 
 # ---------------------------------------------------------------------------
-# sphinx-gallery integration (opt-in via sphinx_examples_as_code_gallery_downloads)
+# sphinx-gallery integration (opt-in via sphinx_examples_as_code_conf['gallery_downloads'])
 # ---------------------------------------------------------------------------
 #
 # sphinx-gallery's own generated download links live in the doctree behind a
@@ -781,10 +781,11 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
         # everything else (latex, text, man, epub, ...).
         return
 
-    position = app.config.sphinx_examples_as_code_link_position
-    formats = app.config.sphinx_examples_as_code_formats
+    conf = app.config.sphinx_examples_as_code_conf
+    position = conf['link_position']
+    formats = conf['formats']
 
-    if app.config.sphinx_examples_as_code_gallery_downloads:
+    if conf['gallery_downloads']:
         _process_gallery_page(app, docname, doctree, position, formats)
 
     # Process spans per shared parent, last to first: inserting a download
@@ -798,37 +799,90 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
         _process_span(app, docname, parent, start, end, heading, counter, position, formats)
 
 
-def _validate_base_url(_app: Sphinx, config: Config) -> None:
-    """Validate and normalize ``sphinx_examples_as_code_base_url``.
+#: Default value for every recognized ``sphinx_examples_as_code_conf`` key --
+#: and the only keys it recognizes; anything else is a typo, caught at build
+#: start rather than silently doing nothing.
+_CONF_DEFAULTS: dict[str, object] = {
+    'link_position': 'top',
+    'formats': ['py', 'ipynb'],
+    'base_url': None,
+    'gallery_downloads': False,
+}
+
+
+def _normalize_base_url(base_url: str | None) -> str | None:
+    """Validate and normalize a ``base_url`` value.
 
     Catches two common typos loudly instead of silently generating wrong
     links: a missing scheme (parses with no netloc at all), and a subpath
     with no trailing slash (``urljoin`` would drop the last segment).
     """
-    base_url = config.sphinx_examples_as_code_base_url
     if not base_url:
-        return
+        return None
 
     parsed = urlsplit(base_url)
     if parsed.scheme not in ('http', 'https') or not parsed.netloc:
         msg = (
-            f'sphinx_examples_as_code_base_url={base_url!r} does not look like a '
-            "valid absolute URL (expected something like 'https://docs.example.com/')."
+            f"sphinx_examples_as_code_conf['base_url']={base_url!r} does not look "
+            "like a valid absolute URL (expected something like 'https://docs.example.com/')."
         )
         raise ConfigError(msg)
 
-    if not base_url.endswith('/'):
-        config.sphinx_examples_as_code_base_url = base_url + '/'
+    return base_url if base_url.endswith('/') else base_url + '/'
+
+
+def _coerce_conf_value(key: str, value: object) -> object:
+    """Coerce a value that may have arrived as a raw string; pass anything else through.
+
+    A value set directly in ``conf.py`` already has its real Python type. A
+    value set via ``-D sphinx_examples_as_code_conf.key=value`` on the
+    command line always arrives as a plain string -- Sphinx's own type
+    coercion for ``-D`` overrides (bool ``0``/``1``, comma-split lists, ...)
+    only applies to a config value's top level, never to a dict's individual
+    keys, so it's redone here for the two keys that need it.
+    """
+    if not isinstance(value, str):
+        return value
+    if key == 'formats':
+        return value.split(',')
+    if key == 'gallery_downloads':
+        if value == '0':
+            return False
+        if value == '1':
+            return True
+        msg = (
+            f"sphinx_examples_as_code_conf['gallery_downloads'] must be '0' or '1', got {value!r}."
+        )
+        raise ConfigError(msg)
+    return value  # link_position, base_url: a string is already the real type
+
+
+def _finalize_conf(_app: Sphinx, config: Config) -> None:
+    """Merge ``sphinx_examples_as_code_conf`` over the defaults, coerce it, and validate it.
+
+    Runs once at ``config-inited``, so every other handler can just read
+    ``app.config.sphinx_examples_as_code_conf[key]`` and get a fully-formed,
+    correctly-typed dict back -- regardless of whether the user set it
+    (fully, partially, or not at all) in ``conf.py``, via ``-D``, or both.
+    """
+    user_conf = config.sphinx_examples_as_code_conf
+    unknown = sorted(set(user_conf) - set(_CONF_DEFAULTS))
+    if unknown:
+        valid = ', '.join(sorted(_CONF_DEFAULTS))
+        msg = f'sphinx_examples_as_code_conf has unknown key(s) {unknown} (valid keys: {valid}).'
+        raise ConfigError(msg)
+
+    merged = dict(_CONF_DEFAULTS)
+    merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
+    merged['base_url'] = _normalize_base_url(merged['base_url'])
+    config.sphinx_examples_as_code_conf = merged
 
 
 def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     """Register the extension."""
     app.connect('doctree-resolved', _process_doctree)
-    app.connect('config-inited', _validate_base_url)
-    app.add_config_value('sphinx_examples_as_code_link_position', 'top', 'env')
-    app.add_config_value('sphinx_examples_as_code_formats', ['py', 'ipynb'], 'env')
-    app.add_config_value('sphinx_examples_as_code_base_url', None, 'env')
-    app.add_config_value('sphinx_examples_as_code_gallery_downloads', False, 'env')
+    app.connect('config-inited', _finalize_conf)
+    app.add_config_value('sphinx_examples_as_code_conf', {}, 'env')
 
     return {
         'version': '0.1',
