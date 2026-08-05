@@ -426,44 +426,6 @@ def test_clean_code_comment_replaces_non_ascii_chars(unicode_char: int, ascii_ch
 
 
 # ---------------------------------------------------------------------------
-# _linkify_bare_urls
-# ---------------------------------------------------------------------------
-
-
-def test_linkify_bare_urls_no_url_unchanged():
-    assert seac._linkify_bare_urls('just some text') == 'just some text'
-
-
-def test_linkify_bare_urls_bare_url_becomes_markdown_link():
-    text = 'Report issues to https://example.com/issues'
-    assert (
-        seac._linkify_bare_urls(text)
-        == 'Report issues to [https://example.com/issues](https://example.com/issues)'
-    )
-
-
-def test_linkify_bare_urls_trailing_period_kept_outside_link():
-    text = 'See https://example.com/page.'
-    assert (
-        seac._linkify_bare_urls(text) == 'See [https://example.com/page](https://example.com/page).'
-    )
-
-
-def test_linkify_bare_urls_multiple_urls():
-    text = 'https://a.example/ and https://b.example/'
-    assert (
-        seac._linkify_bare_urls(text)
-        == '[https://a.example/](https://a.example/) and [https://b.example/](https://b.example/)'
-    )
-
-
-def test_linkify_bare_urls_http_scheme_also_matched():
-    assert (
-        seac._linkify_bare_urls('http://example.com') == '[http://example.com](http://example.com)'
-    )
-
-
-# ---------------------------------------------------------------------------
 # _convert_admonition / _convert_node dispatch
 # ---------------------------------------------------------------------------
 
@@ -759,51 +721,123 @@ def test_convert_node_empty_title_returns_empty():
 # ---------------------------------------------------------------------------
 
 
+def _footer_app(*, base_url: str | None = None) -> Mock:
+    """Build a minimal mocked Sphinx app, sufficient for ``_footer_segment``."""
+    app = Mock()
+    app.config.sphinx_examples_as_code_conf = {'base_url': base_url}
+    app.builder.get_target_uri.side_effect = lambda d: f'{d}.html'
+    return app
+
+
 def test_footer_segment_none_returns_empty():
-    assert seac._footer_segment(None, 'py') == []
+    assert seac._footer_segment(None, 'py', _footer_app(), 'page') == []
 
 
 def test_footer_segment_empty_string_returns_empty():
-    assert seac._footer_segment('', 'py') == []
+    assert seac._footer_segment('', 'py', _footer_app(), 'page') == []
 
 
-def test_footer_segment_single_line_py():
-    assert seac._footer_segment('Generated file.', 'py') == [('directive', ['# Generated file.'])]
+_FOOTER_SEP_LINE = f'# {seac._FOOTER_SEPARATOR}'
 
 
-def test_footer_segment_multiline_becomes_one_comment_per_line():
-    kind, lines = seac._footer_segment('line one\nline two', 'py')[0]
+def test_footer_segment_starts_with_the_separator():
+    # marks the footer as trailing boilerplate, distinct from the example's
+    # own comments -- and (dashes specifically) renders as a real <hr> in
+    # .ipynb, confirmed against an actual CommonMark parser, not assumed
+    segments = seac._footer_segment('Generated file.', 'py', _footer_app(), 'page')
+    assert segments[0][1][0] == _FOOTER_SEP_LINE
+
+
+def test_footer_segment_plain_text_single_line():
+    # no RST markup at all -- the common case for a custom footer -- behaves
+    # exactly as it always has otherwise: one comment line after the separator
+    segments = seac._footer_segment('Generated file.', 'py', _footer_app(), 'page')
+    assert segments == [('directive', [_FOOTER_SEP_LINE, '# Generated file.'])]
+
+
+def test_footer_segment_plain_text_multiline_becomes_one_comment_per_line():
+    # a single newline (no blank line) stays one RST paragraph, with the
+    # line break preserved in its text -- verified against a real docutils
+    # parse, not assumed: publish_doctree('line one\nline two') keeps them
+    # as one <paragraph> whose text is 'line one\nline two', not folded
+    # into 'line one line two'
+    segments = seac._footer_segment('line one\nline two', 'py', _footer_app(), 'page')
+    kind, lines = segments[0]
     assert kind == 'directive'
-    assert lines == ['# line one', '# line two']
+    assert lines == [_FOOTER_SEP_LINE, '# line one', '# line two']
 
 
-def test_footer_segment_py_url_not_linkified():
-    _kind, lines = seac._footer_segment('See https://example.com/issues', 'py')[0]
-    assert lines == ['# See https://example.com/issues']
+def test_footer_segment_blank_line_separated_paragraphs_both_kept():
+    segments = seac._footer_segment('first\n\nsecond', 'py', _footer_app(), 'page')
+    kind, lines = segments[0]
+    assert kind == 'directive'
+    assert lines == [_FOOTER_SEP_LINE, '# first', '# second']
 
 
-def test_footer_segment_ipynb_url_linkified():
-    _kind, lines = seac._footer_segment('See https://example.com/issues', 'ipynb')[0]
-    assert lines == ['# See [https://example.com/issues](https://example.com/issues)']
+def test_footer_segment_bare_url_recognized_by_docutils_natively():
+    # no custom regex needed for this: docutils' standard RST parser
+    # already auto-recognizes a bare http(s) URL as a hyperlink on its own.
+    # There's no custom link text here though, so it's still shown as both
+    # the label and the target -- an RST hyperlink with its own text (the
+    # tests above) reads better, which is why _DEFAULT_FOOTER uses one.
+    footer = 'https://example.com/issues'
+    _kind, lines = seac._footer_segment(footer, 'ipynb', _footer_app(), 'page')[0]
+    assert lines == [
+        _FOOTER_SEP_LINE,
+        '# [https://example.com/issues](https://example.com/issues)',
+    ]
+
+
+def test_footer_segment_link_mid_sentence_in_py_reads_awkwardly():
+    # documents *why* _DEFAULT_FOOTER keeps each link at the very end of its
+    # own paragraph: in .py, a resolved reference always lands on its own
+    # line (in_see_also=True), so a link sitting mid-sentence splits the
+    # sentence around it instead of reading as one line
+    footer = 'See https://example.com/issues for details.'
+    _kind, lines = seac._footer_segment(footer, 'py', _footer_app(), 'page')[0]
+    assert lines == [
+        _FOOTER_SEP_LINE,
+        '# See',
+        '# https://example.com/issues https://example.com/issues',
+        '#  for details.',
+    ]
+
+
+def test_footer_segment_rst_hyperlink_py_shows_text_and_url():
+    # rendered with in_see_also=True -- the exact same "See Also"-style
+    # link handling used everywhere else, not new footer-specific logic
+    footer = '`Report issues <https://example.com/issues>`_'
+    _kind, lines = seac._footer_segment(footer, 'py', _footer_app(), 'page')[0]
+    assert lines == [_FOOTER_SEP_LINE, '# Report issues https://example.com/issues']
+
+
+def test_footer_segment_rst_hyperlink_ipynb_becomes_clickable_link():
+    footer = '`Report issues <https://example.com/issues>`_'
+    _kind, lines = seac._footer_segment(footer, 'ipynb', _footer_app(), 'page')[0]
+    assert lines == [_FOOTER_SEP_LINE, '# [Report issues](https://example.com/issues)']
 
 
 def test_footer_segment_default_footer_py():
-    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'py')[0][1]
-    expected = (
-        '# File generated by `sphinx-examples-as-code`. Report issues to '
-        'https://github.com/pyvista/sphinx-examples-as-code/issues'
-    )
-    assert lines == [expected]
+    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'py', _footer_app(), 'page')[0][1]
+    assert lines == [
+        _FOOTER_SEP_LINE,
+        '# Generated by',
+        '# sphinx-examples-as-code https://github.com/pyvista/sphinx-examples-as-code',
+        '# Report issues at',
+        '# sphinx-examples-as-code/issues https://github.com/pyvista/sphinx-examples-as-code/issues',
+    ]
 
 
-def test_footer_segment_default_footer_ipynb_link_clickable():
-    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'ipynb')[0][1]
-    expected = (
-        '# File generated by `sphinx-examples-as-code`. Report issues to '
-        '[https://github.com/pyvista/sphinx-examples-as-code/issues]'
+def test_footer_segment_default_footer_ipynb_links_clickable_and_not_redundant():
+    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'ipynb', _footer_app(), 'page')[0][1]
+    line0 = '# Generated by [sphinx-examples-as-code](https://github.com/pyvista/sphinx-examples-as-code)'
+    line1 = (
+        '# Report issues at [sphinx-examples-as-code/issues]'
         '(https://github.com/pyvista/sphinx-examples-as-code/issues)'
     )
-    assert lines == [expected]
+    assert lines == [_FOOTER_SEP_LINE, line0, line1]
+    # the repo name is a real link, not just inline code with no link at all
+    assert '`sphinx-examples-as-code`' not in ''.join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1082,8 +1116,9 @@ def test_process_span_appends_footer_with_blank_line_before(tmp_path: Path):
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     lines = written.read_text().splitlines()
-    footer_idx = lines.index('# Generated footer text.')
-    assert lines[footer_idx - 1] == ''  # blank line before the footer
+    sep_idx = lines.index(_FOOTER_SEP_LINE)
+    assert lines[sep_idx - 1] == ''  # blank line before the footer's separator
+    assert lines[sep_idx + 1] == '# Generated footer text.'
 
 
 def test_process_span_no_footer_configured_omits_it(tmp_path: Path):
@@ -1400,12 +1435,54 @@ def test_gallery_example_name(docname: str, expected: str):
     assert seac._gallery_example_name(docname) == expected
 
 
+def test_gallery_page_title_extracts_text():
+    section = nodes.section()
+    section += nodes.title('', 'Create Circular Arcs')
+    section += nodes.paragraph('', 'intro')
+    assert seac._gallery_page_title(section) == 'Create Circular Arcs'
+
+
+def test_gallery_page_title_no_title_returns_none():
+    section = nodes.section()
+    section += nodes.paragraph('', 'no title here')
+    assert seac._gallery_page_title(section) is None
+
+
+def test_gallery_page_title_empty_title_returns_none():
+    section = nodes.section()
+    section += nodes.title()
+    assert seac._gallery_page_title(section) is None
+
+
 def test_process_gallery_page_not_a_gallery_page_is_a_no_op(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _parse('Some ordinary page\n\nwith a paragraph.')
     original = doctree.pformat()
     seac._process_gallery_page(app, 'page', doctree, 'bottom', ['py', 'ipynb'], None)
     assert doctree.pformat() == original
+
+
+def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
+    # not "# Examples from plot_minimal" -- gallery mode converts the whole
+    # page, so its own title reads far better than a docname-derived name
+    app = Mock(outdir=str(tmp_path))
+    doctree = _build_gallery_doctree()  # title: 'An example'
+    seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    lines = written.read_text(encoding='utf-8').splitlines()
+    assert lines[0] == '# An example'
+    assert lines[1] == '# ' + '-' * len('An example')
+    assert not lines[0].startswith('# Examples from')
+
+
+def test_process_gallery_page_no_title_falls_back_to_examples_from_header(tmp_path: Path):
+    app = Mock(outdir=str(tmp_path))
+    doctree = _build_gallery_doctree(with_title=False)
+    seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert written.read_text(encoding='utf-8').startswith('# Examples from plot_minimal')
 
 
 def test_process_gallery_page_strips_furniture_and_inserts_download(tmp_path: Path):
@@ -1640,10 +1717,14 @@ def test_finalize_conf_partial_dict_keeps_the_rest_default():
 def test_finalize_conf_default_footer_text():
     # pinned explicitly, not just via dict equality against _CONF_DEFAULTS --
     # this is user-facing text, so a change to its wording should be a
-    # deliberate, visible diff here rather than an incidental one.
+    # deliberate, visible diff here rather than an incidental one. RST
+    # source (see _footer_segment): each hyperlink is its own paragraph.
     assert seac._DEFAULT_FOOTER == (
-        'File generated by `sphinx-examples-as-code`. Report issues to '
-        'https://github.com/pyvista/sphinx-examples-as-code/issues'
+        'Generated by `sphinx-examples-as-code '
+        '<https://github.com/pyvista/sphinx-examples-as-code>`_\n'
+        '\n'
+        'Report issues at `sphinx-examples-as-code/issues '
+        '<https://github.com/pyvista/sphinx-examples-as-code/issues>`_'
     )
 
 

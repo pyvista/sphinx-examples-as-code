@@ -17,6 +17,7 @@ from urllib.parse import urljoin
 from urllib.parse import urlsplit
 
 from docutils import nodes
+from docutils.core import publish_doctree
 from sphinx import addnodes
 from sphinx.errors import ConfigError
 
@@ -222,30 +223,6 @@ def _clean_code_comment(line: str) -> str:
         line = _clean_stray_rst_markup(line)
         line = line.translate(ASCII_REPLACEMENTS)
     return line
-
-
-# Trailing punctuation that commonly follows a URL in prose (a sentence-ending
-# period, a comma, a closing bracket, ...) -- kept outside the link itself.
-_BARE_URL_RE = re.compile(r'https?://\S+')
-_URL_TRAILING_PUNCTUATION = '.,;:!?)]}\'"'
-
-
-def _linkify_bare_urls(text: str) -> str:
-    """Turn bare ``http(s)`` URLs in ``text`` into markdown links.
-
-    Used for the footer's ``.ipynb`` rendering -- a ``.py`` comment can't be
-    a real hyperlink, so this is only applied there.
-    """
-
-    def _replace(match: re.Match[str]) -> str:
-        url = match.group(0)
-        trailing = ''
-        while url and url[-1] in _URL_TRAILING_PUNCTUATION:
-            trailing = url[-1] + trailing
-            url = url[:-1]
-        return f'[{url}]({url}){trailing}'
-
-    return _BARE_URL_RE.sub(_replace, text)
 
 
 def _render_reference(node: nodes.reference, ctx: _RenderContext) -> str:
@@ -523,22 +500,45 @@ def _header_segment(qualified_name: str) -> Segment:
     return _title_underline_segment(f'Examples from {qualified_name}')
 
 
-def _footer_segment(footer: str | None, fmt: str) -> list[Segment]:
+# A plain divider, not tied to any specific text's length the way a title
+# underline is (see _title_underline_segment) -- dashes specifically, not
+# e.g. '=', since '=' isn't a valid CommonMark thematic-break character:
+# once the '# ' prefix is stripped for a markdown cell, a lone dash line
+# preceded by a blank line renders as a real <hr> in .ipynb, marking the
+# footer as trailing boilerplate rather than more comment text that reads
+# like it's part of the example itself.
+_FOOTER_SEPARATOR = '-' * 70
+
+
+def _footer_segment(footer: str | None, fmt: str, app: Sphinx, docname: str) -> list[Segment]:
     """Build the footer directive segment, if a footer is configured.
 
     Empty (0 or 1 elements, not a bare ``Segment | None``) so callers can
     just splat it into a segment list like ``_header_segment``'s result.
-    Enclosed in comments like any other directive (multiple lines become one
-    comment per line); for ``.ipynb``, any bare URL is turned into a
-    clickable markdown link first -- a ``.py`` comment can't be a real
-    hyperlink, so it stays plain text there.
+    Starts with ``_FOOTER_SEPARATOR`` -- see its comment for why.
+
+    Parsed as RST -- the same way any other prose in this extension is --
+    rather than treated as a special case: a hyperlink written as
+    ```` `text <url>`_ ```` becomes a real clickable Markdown link in
+    ``.ipynb`` and a "text url" line in ``.py``, by rendering with
+    ``in_see_also=True`` -- reusing the exact same "See Also"-style link
+    handling used everywhere else, not new formatting logic. Plain text
+    with no RST markup at all (the common case for a custom footer)
+    behaves exactly as it always has: one comment line per line of text.
+
+    Parsed independently of the Sphinx build (plain docutils, not through
+    Sphinx's own reader), so Sphinx-specific roles like :func:/:class: won't
+    resolve here -- only plain RST hyperlink syntax is supported.
     """
     if not footer:
         return []
-    text = _linkify_bare_urls(footer) if fmt == 'ipynb' else footer
-    lines: list[str] = []
-    _add_comment(lines, text)
-    return [('directive', lines)]
+    doctree = publish_doctree(footer, settings_overrides={'report_level': 5})
+    ctx = _RenderContext(app=app, docname=docname, fmt=fmt, in_see_also=True)
+    segments: list[Segment] = []
+    for node in doctree.children:
+        segments.extend(_convert_node(node, ctx))
+    lines = _join_segments(segments)
+    return [('directive', [f'# {_FOOTER_SEPARATOR}', *lines])] if lines else []
 
 
 def _strip_comment_prefix(line: str) -> str:
@@ -707,6 +707,7 @@ def _build_download_entries(
     app: Sphinx,
     docname: str,
     name: str,
+    header: Segment,
     nodes_in_span: list[nodes.Node],
     formats: list[str],
     footer: str | None,
@@ -716,8 +717,9 @@ def _build_download_entries(
     Returns ``(label, rel_path)`` entries for whichever formats are
     requested -- empty if the span has no real code, or ``formats`` itself
     is empty. Shared by the docstring-Examples path and gallery-page path;
-    the only difference between them is how ``nodes_in_span`` and ``name``
-    get built.
+    the only differences between them are how ``nodes_in_span``/``name``
+    get built, and what ``header`` says (see ``_header_segment`` vs.
+    ``_process_gallery_page``'s own title handling).
     """
     py_ctx = _RenderContext(app=app, docname=docname, fmt='py')
     py_segments = _build_segments(nodes_in_span, py_ctx)
@@ -725,7 +727,7 @@ def _build_download_entries(
     if not any(kind == 'code' for kind, _lines in py_segments):
         return []
 
-    py_segments_full = [_header_segment(name), *py_segments, *_footer_segment(footer, 'py')]
+    py_segments_full = [header, *py_segments, *_footer_segment(footer, 'py', app, docname)]
     source = '\n'.join(_join_segments(py_segments_full)).rstrip() + '\n\n'
 
     if not _has_real_code(source):
@@ -741,12 +743,15 @@ def _build_download_entries(
         else:
             ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
             ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
-            ipynb_segments_full = [
-                _header_segment(name),
-                *ipynb_segments,
-                *_footer_segment(footer, 'ipynb'),
-            ]
-            cells = _segments_to_cells(ipynb_segments_full)
+            # Converted separately from the footer and concatenated, rather
+            # than joined into one segment list and converted together:
+            # _segments_to_cells only starts a new cell when the kind
+            # switches between 'code' and 'markdown', so a footer directly
+            # following non-code content (e.g. a trailing admonition) would
+            # otherwise share its cell instead of always getting one of its
+            # own.
+            cells = _segments_to_cells([header, *ipynb_segments])
+            cells.extend(_segments_to_cells(_footer_segment(footer, 'ipynb', app, docname)))
             rel_path = _write_notebook(app, name, _build_notebook(cells))
         entries.append((label, rel_path))
 
@@ -772,7 +777,9 @@ def _process_span(
         nodes_in_span.append(external_see_also)
 
     name = _qualified_name_for(heading, docname, counter)
-    entries = _build_download_entries(app, docname, name, nodes_in_span, formats, footer)
+    entries = _build_download_entries(
+        app, docname, name, _header_segment(name), nodes_in_span, formats, footer
+    )
     if not entries:
         return
 
@@ -840,6 +847,14 @@ def _gallery_example_name(docname: str) -> str:
     return Path(docname).name or docname
 
 
+def _gallery_page_title(section: nodes.section) -> str | None:
+    """Extract a gallery page's own title text, if it has one."""
+    title_node = next((child for child in section.children if isinstance(child, nodes.title)), None)
+    if title_node is None:
+        return None
+    return title_node.astext().strip() or None
+
+
 def _process_gallery_page(
     app: Sphinx,
     docname: str,
@@ -869,13 +884,21 @@ def _process_gallery_page(
     # as sections, titles and all -- see _convert_node's nodes.section case.
     first, rest = top_level[0], top_level[1:]
     if isinstance(first, nodes.section):
+        title = _gallery_page_title(first)
         nodes_in_span = [child for child in first.children if not isinstance(child, nodes.title)]
         nodes_in_span.extend(rest)
     else:
+        title = None
         nodes_in_span = top_level
 
     name = _gallery_example_name(docname)
-    entries = _build_download_entries(app, docname, name, nodes_in_span, formats, footer)
+    # The page's own title reads far better as the header than "Examples
+    # from <docname-derived name>": gallery mode converts the whole page,
+    # not an Examples section carved out of a larger docstring, so there's
+    # no "from" framing to make. Falls back to the usual header on the off
+    # chance the page has no title of its own.
+    header = _title_underline_segment(title) if title else _header_segment(name)
+    entries = _build_download_entries(app, docname, name, header, nodes_in_span, formats, footer)
     if not entries:
         return
 
@@ -914,9 +937,17 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
         _process_span(app, docname, parent, start, end, heading, counter, position, formats, footer)
 
 
+# RST hyperlinks, each its own paragraph -- keeps each one's link right at
+# the end of its sentence, since _render_reference's in_see_also rendering
+# always surrounds a resolved link with newlines (see _footer_segment):
+# awkward stray punctuation would otherwise land on its own line if a link
+# sat mid-sentence instead.
 _DEFAULT_FOOTER = (
-    'File generated by `sphinx-examples-as-code`. Report issues to '
-    'https://github.com/pyvista/sphinx-examples-as-code/issues'
+    'Generated by `sphinx-examples-as-code '
+    '<https://github.com/pyvista/sphinx-examples-as-code>`_\n'
+    '\n'
+    'Report issues at `sphinx-examples-as-code/issues '
+    '<https://github.com/pyvista/sphinx-examples-as-code/issues>`_'
 )
 
 #: Default value for every recognized ``sphinx_examples_as_code_conf`` key --
