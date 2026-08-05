@@ -1,4 +1,4 @@
-"""Integration tests for ``sphinx_examples_as_code_gallery_downloads``.
+"""Integration tests for ``sphinx_examples_as_code_conf['gallery_downloads']``.
 
 Builds a real sphinx-gallery site (not a hand-built doctree) to confirm the
 opt-in gallery mode behaves correctly against sphinx-gallery's actual output,
@@ -51,9 +51,11 @@ def _build(tmp_path: Path, *, gallery_downloads: bool | None) -> tuple[int, str,
     doctree_dir = tmp_path / 'doctrees'
     sphinx_args = ()
     if gallery_downloads is not None:
-        # bool config values need Sphinx's own '0'/'1' spelling via -D, not 'True'/'False'.
+        # bool sub-values need '0'/'1' spelling via -D, not 'True'/'False' --
+        # see _coerce_conf_value, which is what actually parses this string
+        # (Sphinx's own -D type coercion never applies to dict sub-keys).
         flag = '1' if gallery_downloads else '0'
-        sphinx_args = ('-D', f'sphinx_examples_as_code_gallery_downloads={flag}')
+        sphinx_args = ('-D', f'sphinx_examples_as_code_conf.gallery_downloads={flag}')
     returncode, out, err = _run_sphinx_build(
         _sphinx_build_cmd(src_dir, html_dir, doctree_dir, sphinx_args)
     )
