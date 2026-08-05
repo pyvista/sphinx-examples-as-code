@@ -220,6 +220,30 @@ def _clean_code_comment(line: str) -> str:
     return line
 
 
+# Trailing punctuation that commonly follows a URL in prose (a sentence-ending
+# period, a comma, a closing bracket, ...) -- kept outside the link itself.
+_BARE_URL_RE = re.compile(r'https?://\S+')
+_URL_TRAILING_PUNCTUATION = '.,;:!?)]}\'"'
+
+
+def _linkify_bare_urls(text: str) -> str:
+    """Turn bare ``http(s)`` URLs in ``text`` into markdown links.
+
+    Used for the footer's ``.ipynb`` rendering -- a ``.py`` comment can't be
+    a real hyperlink, so this is only applied there.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        url = match.group(0)
+        trailing = ''
+        while url and url[-1] in _URL_TRAILING_PUNCTUATION:
+            trailing = url[-1] + trailing
+            url = url[:-1]
+        return f'[{url}]({url}){trailing}'
+
+    return _BARE_URL_RE.sub(_replace, text)
+
+
 def _render_reference(node: nodes.reference, ctx: _RenderContext) -> str:
     """Render a resolved or unresolved cross-reference/hyperlink.
 
@@ -462,6 +486,24 @@ def _header_segment(qualified_name: str) -> Segment:
     return ('directive', [f'# {title}', f'# {underline}'])
 
 
+def _footer_segment(footer: str | None, fmt: str) -> list[Segment]:
+    """Build the footer directive segment, if a footer is configured.
+
+    Empty (0 or 1 elements, not a bare ``Segment | None``) so callers can
+    just splat it into a segment list like ``_header_segment``'s result.
+    Enclosed in comments like any other directive (multiple lines become one
+    comment per line); for ``.ipynb``, any bare URL is turned into a
+    clickable markdown link first -- a ``.py`` comment can't be a real
+    hyperlink, so it stays plain text there.
+    """
+    if not footer:
+        return []
+    text = _linkify_bare_urls(footer) if fmt == 'ipynb' else footer
+    lines: list[str] = []
+    _add_comment(lines, text)
+    return [('directive', lines)]
+
+
 def _strip_comment_prefix(line: str) -> str:
     """Remove the leading ``# `` (or bare ``#``) from a generated comment line."""
     if line == '#':
@@ -630,6 +672,7 @@ def _build_download_entries(
     name: str,
     nodes_in_span: list[nodes.Node],
     formats: list[str],
+    footer: str | None,
 ) -> list[tuple[str, str]]:
     """Convert a span of nodes into written ``.py``/``.ipynb`` files, per ``formats``.
 
@@ -645,7 +688,8 @@ def _build_download_entries(
     if not any(kind == 'code' for kind, _lines in py_segments):
         return []
 
-    source = '\n'.join(_join_segments([_header_segment(name), *py_segments])).rstrip() + '\n\n'
+    py_segments_full = [_header_segment(name), *py_segments, *_footer_segment(footer, 'py')]
+    source = '\n'.join(_join_segments(py_segments_full)).rstrip() + '\n\n'
 
     if not _has_real_code(source):
         return []
@@ -660,7 +704,12 @@ def _build_download_entries(
         else:
             ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
             ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
-            cells = _segments_to_cells([_header_segment(name), *ipynb_segments])
+            ipynb_segments_full = [
+                _header_segment(name),
+                *ipynb_segments,
+                *_footer_segment(footer, 'ipynb'),
+            ]
+            cells = _segments_to_cells(ipynb_segments_full)
             rel_path = _write_notebook(app, name, _build_notebook(cells))
         entries.append((label, rel_path))
 
@@ -677,6 +726,7 @@ def _process_span(
     counter: int,
     position: str,
     formats: list[str],
+    footer: str | None,
 ) -> None:
     """Convert one Examples span and insert download link(s) if it has real code."""
     nodes_in_span = list(parent.children[start:end])
@@ -685,7 +735,7 @@ def _process_span(
         nodes_in_span.append(external_see_also)
 
     name = _qualified_name_for(heading, docname, counter)
-    entries = _build_download_entries(app, docname, name, nodes_in_span, formats)
+    entries = _build_download_entries(app, docname, name, nodes_in_span, formats, footer)
     if not entries:
         return
 
@@ -754,6 +804,7 @@ def _process_gallery_page(
     doctree: nodes.document,
     position: str,
     formats: list[str],
+    footer: str | None,
 ) -> None:
     """Replace a sphinx-gallery page's own download footer with converted downloads.
 
@@ -768,7 +819,7 @@ def _process_gallery_page(
     nodes_in_span = list(parent.children[start:end])
 
     name = _gallery_example_name(docname)
-    entries = _build_download_entries(app, docname, name, nodes_in_span, formats)
+    entries = _build_download_entries(app, docname, name, nodes_in_span, formats, footer)
     if not entries:
         return
 
@@ -786,9 +837,10 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
     conf = app.config.sphinx_examples_as_code_conf
     position = conf['link_position']
     formats = conf['formats']
+    footer = conf['footer']
 
     if conf['gallery_downloads']:
-        _process_gallery_page(app, docname, doctree, position, formats)
+        _process_gallery_page(app, docname, doctree, position, formats, footer)
 
     # Process spans per shared parent, last to first: inserting a download
     # node shifts every later sibling index by one, so this stays correct
@@ -798,8 +850,13 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
     for parent, start, end, heading, counter in sorted(
         numbered_spans, key=lambda s: (id(s[0]), -s[1])
     ):
-        _process_span(app, docname, parent, start, end, heading, counter, position, formats)
+        _process_span(app, docname, parent, start, end, heading, counter, position, formats, footer)
 
+
+_DEFAULT_FOOTER = (
+    'File generated by `sphinx-examples-as-code`. Report issues to '
+    'https://github.com/pyvista/sphinx-examples-as-code/issues'
+)
 
 #: Default value for every recognized ``sphinx_examples_as_code_conf`` key --
 #: and the only keys it recognizes; anything else is a typo, caught at build
@@ -809,6 +866,7 @@ _CONF_DEFAULTS: dict[str, object] = {
     'formats': ['py', 'ipynb'],
     'base_url': None,
     'gallery_downloads': False,
+    'footer': _DEFAULT_FOOTER,
 }
 
 
@@ -856,7 +914,7 @@ def _coerce_conf_value(key: str, value: object) -> object:
             f"sphinx_examples_as_code_conf['gallery_downloads'] must be '0' or '1', got {value!r}."
         )
         raise ConfigError(msg)
-    return value  # link_position, base_url: a string is already the real type
+    return value  # link_position, base_url, footer: a string is already the real type
 
 
 def _finalize_conf(_app: Sphinx, config: Config) -> None:
