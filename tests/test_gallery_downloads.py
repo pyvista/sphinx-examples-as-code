@@ -208,10 +208,10 @@ def test_gallery_downloads_ipynb_is_valid(gallery_build: tuple[Path, str]):
 
 
 def test_gallery_downloads_footer_is_its_own_dedicated_ipynb_cell(gallery_build: tuple[Path, str]):
-    """Since the footer directly follows a code cell here, it starts a new one.
+    """The footer always gets its own markdown cell -- here, following a code cell.
 
-    Confirms the separator (see test_tinypages.py for the "shares a cell"
-    case) can also be a cell's very first line, not just mid-cell.
+    See ``test_tinypages.py`` for the harder case, where the footer directly
+    follows markdown content instead and would otherwise merge into it.
     """
     html_dir, _html = gallery_build
     notebook = json.loads(_generated(html_dir, '.ipynb').read_text(encoding='utf-8'))

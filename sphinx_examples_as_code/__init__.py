@@ -743,12 +743,15 @@ def _build_download_entries(
         else:
             ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
             ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
-            ipynb_segments_full = [
-                header,
-                *ipynb_segments,
-                *_footer_segment(footer, 'ipynb', app, docname),
-            ]
-            cells = _segments_to_cells(ipynb_segments_full)
+            # Converted separately from the footer and concatenated, rather
+            # than joined into one segment list and converted together:
+            # _segments_to_cells only starts a new cell when the kind
+            # switches between 'code' and 'markdown', so a footer directly
+            # following non-code content (e.g. a trailing admonition) would
+            # otherwise share its cell instead of always getting one of its
+            # own.
+            cells = _segments_to_cells([header, *ipynb_segments])
+            cells.extend(_segments_to_cells(_footer_segment(footer, 'ipynb', app, docname)))
             rel_path = _write_notebook(app, name, _build_notebook(cells))
         entries.append((label, rel_path))
 

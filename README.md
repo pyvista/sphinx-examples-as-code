@@ -59,9 +59,11 @@ sphinx_examples_as_code_conf = {
   "generated file" credit linking back to this project's issue tracker; set to `None`
   to omit it entirely. Preceded by a blank line and a `-`-only divider line, marking it
   as trailing boilerplate rather than more of the example's own commentary -- the
-  divider also renders as a real horizontal rule in `.ipynb`. Parsed as RST, the same
-  as any other prose this extension handles: a hyperlink written as `` `text <url>`_ ``
-  becomes a real clickable Markdown link in `.ipynb` and a `text url` line in `.py`.
+  divider also renders as a real horizontal rule in `.ipynb`, where the footer always
+  gets its own dedicated cell, regardless of what content precedes it. Parsed as RST,
+  the same as any other prose this extension handles: a hyperlink written as
+  `` `text <url>`_ `` becomes a real clickable Markdown link in `.ipynb` and a
+  `text url` line in `.py`.
   Plain text with no markup at all (the common case for a custom footer) becomes one
   comment line per line of text, same as always. Keep a link at the end of its
   sentence/paragraph rather than in the middle of one -- a resolved link in `.py`

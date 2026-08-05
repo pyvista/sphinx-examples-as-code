@@ -633,17 +633,21 @@ def test_default_footer_appears_in_ipynb_with_clickable_links(tmp_path: Path):
     assert 'Report issues at sphinx-examples-as-code/issues https://' not in all_source
 
 
-def test_default_footer_separator_preceded_by_blank_line_in_ipynb(tmp_path: Path):
-    """The separator renders as a real ``<hr>`` in the notebook, not more text.
+def test_default_footer_is_its_own_dedicated_ipynb_cell(tmp_path: Path):
+    """The footer always gets its own markdown cell, never sharing one.
 
-    Confirmed against an actual CommonMark parser (Python-Markdown) during
-    development, not just assumed from the spec: a lone line of 3+ dashes,
-    preceded by a blank line, is a thematic break -- '=' would not be (only
-    valid for setext heading underlines, not thematic breaks). Whatever
-    markdown content directly precedes the footer here (a case_note's
-    trailing ``.. note::``, with no code between it and the footer) shares
-    its cell -- see test_gallery_downloads.py for a case where the footer
-    lands in a dedicated cell of its own.
+    ``case_note``'s Examples section ends with a ``.. note::`` -- markdown
+    content directly preceding the footer, with no code in between -- which
+    would otherwise land in the same cell (``_segments_to_cells`` only splits
+    on code/markdown transitions). Confirms it's split out anyway; see
+    ``test_gallery_downloads.py`` for the case where the footer already
+    follows a code cell, so it would land in its own cell either way.
+
+    Also confirms the separator renders as a real ``<hr>``, not more text:
+    confirmed against an actual CommonMark parser (Python-Markdown) during
+    development, not just assumed from the spec -- a lone line of 3+ dashes,
+    preceded by a blank line, is a thematic break ('=' would not be, only
+    valid for setext heading underlines, not thematic breaks).
     """
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
@@ -656,8 +660,9 @@ def test_default_footer_separator_preceded_by_blank_line_in_ipynb(tmp_path: Path
         c for c in notebook['cells'] if 'sphinx-examples-as-code/issues' in ''.join(c['source'])
     )
     lines = [line.rstrip() for line in footer_cell['source']]
-    sep_idx = lines.index(seac._FOOTER_SEPARATOR)
-    assert lines[sep_idx - 1] == ''
+    assert lines[0] == seac._FOOTER_SEPARATOR
+    # the note's own content stayed behind in a separate, earlier cell
+    assert 'useful information' not in ''.join(footer_cell['source'])
 
 
 def test_footer_disabled_by_empty_override(built: tuple[Path, list[Path]]):
