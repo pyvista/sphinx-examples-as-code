@@ -390,7 +390,16 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
         title_node = node.next_node(nodes.title)
         label = title_node.astext().strip() if title_node is not None else 'NOTE'
         return _convert_admonition(node, label, ctx, skip_first_title=True)
-    if isinstance(node, _CONTAINER_TYPES):
+    if isinstance(node, (*_CONTAINER_TYPES, nodes.section)):
+        # nodes.section (gallery mode only): a sphinx-gallery ``# %%`` cell
+        # with its own RST heading becomes a *sibling* section at the
+        # document level, not a subsection nested inside the page's own
+        # section (docutils promotes same-level headings to siblings, it
+        # doesn't nest them) -- so this shows up as an ordinary child in a
+        # gallery page's span. Recursing treats it exactly like any other
+        # container: its title falls through to the plain-text-node case
+        # below like any other heading text, becoming a comment, and the
+        # rest of its children go through the normal per-node conversion.
         segments: list[Segment] = []
         for child in node.children:
             segments.extend(_convert_node(child, ctx))
@@ -781,16 +790,21 @@ def _strip_gallery_furniture(doctree: nodes.document) -> bool:
 
 
 def _gallery_body(doctree: nodes.document) -> tuple[nodes.Element, int, int]:
-    """Return ``(parent, start, end)`` spanning a gallery page's content, title excluded.
+    """Return ``(parent, start, end)`` spanning a gallery page's top-level sections.
 
-    A sphinx-gallery page nests its whole rendered example (title, prose,
-    code, ...) under one top-level section; falls back to the document
-    itself on the off chance that's missing.
+    A sphinx-gallery page's content is *not* nested under one section the
+    way it might look: a ``# %%`` cell with its own RST heading becomes a
+    *sibling* section at the document level -- docutils promotes a
+    same-level heading to a new sibling section rather than nesting it --
+    so a page can have several top-level sections in a row (one per headed
+    cell). This spans all of them: from the first section found through the
+    end of the document. Falls back to the document itself on the off
+    chance there's no section at all.
     """
-    section = next(doctree.findall(nodes.section), None)
-    parent = section if section is not None else doctree
-    start = 1 if parent.children and isinstance(parent.children[0], nodes.title) else 0
-    return parent, start, len(parent.children)
+    first_section = next(doctree.findall(nodes.section), None)
+    if first_section is None:
+        return doctree, 0, len(doctree.children)
+    return doctree, doctree.index(first_section), len(doctree.children)
 
 
 def _gallery_example_name(docname: str) -> str:
@@ -816,7 +830,21 @@ def _process_gallery_page(
         return
 
     parent, start, end = _gallery_body(doctree)
-    nodes_in_span = list(parent.children[start:end])
+    top_level = list(parent.children[start:end])
+    if not top_level:
+        return
+
+    # The first top-level node is the page's own outer section (title,
+    # intro, ...) -- our own header replaces its title, so that's dropped
+    # and the rest of its children flattened into the span; any further
+    # sibling sections (one per "# %%" cell with its own heading) are kept
+    # as sections, titles and all -- see _convert_node's nodes.section case.
+    first, rest = top_level[0], top_level[1:]
+    if isinstance(first, nodes.section):
+        nodes_in_span = [child for child in first.children if not isinstance(child, nodes.title)]
+        nodes_in_span.extend(rest)
+    else:
+        nodes_in_span = top_level
 
     name = _gallery_example_name(docname)
     entries = _build_download_entries(app, docname, name, nodes_in_span, formats, footer)
@@ -824,7 +852,12 @@ def _process_gallery_page(
         return
 
     download_node = _make_download_node(entries)
-    parent.insert(start if position == 'top' else end, download_node)
+    if position == 'top' and isinstance(first, nodes.section):
+        # Right after the page's own title -- matching what 'top' means for
+        # a docstring Examples section -- not before the whole page/title.
+        first.insert(1, download_node)
+    else:
+        parent.insert(start if position == 'top' else end, download_node)
 
 
 def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None:

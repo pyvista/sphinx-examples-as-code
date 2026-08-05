@@ -555,6 +555,24 @@ def test_convert_node_empty_paragraph_returns_empty():
     assert seac._convert_node(nodes.paragraph(), _ctx()) == []
 
 
+def test_convert_node_section_title_becomes_comment_and_children_recurse():
+    # gallery mode: a "# %%" cell's own sibling section -- its title falls
+    # through to the plain-text case like any other heading text, and its
+    # other children (prose, code, ...) get converted normally
+    section = nodes.section()
+    section += nodes.title('', 'A subsection')
+    section += nodes.paragraph('', 'prose here')
+    code_block = nodes.literal_block('', 'x = 1')
+    code_block['language'] = 'Python'
+    section += code_block
+
+    assert seac._convert_node(section, _ctx()) == [
+        ('text', ['# A subsection']),
+        ('text', ['# prose here']),
+        ('code', ['x = 1']),
+    ]
+
+
 def test_convert_node_literal_block_dispatch():
     node = nodes.literal_block('', 'x = 1')
     node['language'] = 'python'
@@ -1264,20 +1282,67 @@ def test_convert_node_drops_gallery_signature_block():
     assert seac._convert_node(_gallery_signature(), _ctx()) == []
 
 
-def test_gallery_body_skips_leading_title():
+def test_gallery_body_spans_from_first_section_to_end_of_document():
+    # _gallery_body's parent is always the document itself now -- title
+    # exclusion is _process_gallery_page's job (only the *first* section's
+    # title gets dropped; sibling sections keep theirs, see below)
     doctree = _build_gallery_doctree()
     seac._strip_gallery_furniture(doctree)
     parent, start, end = seac._gallery_body(doctree)
-    assert isinstance(parent, nodes.section)
-    assert start == 1  # title excluded
-    assert end == len(parent.children)
+    assert parent is doctree
+    section = next(doctree.findall(nodes.section))
+    assert start == doctree.index(section)
+    assert end == len(doctree.children)
 
 
-def test_gallery_body_no_title_starts_at_zero():
-    doctree = _build_gallery_doctree(with_title=False)
+def _gallery_subsection(title: str, code: str) -> nodes.section:
+    """Build a sibling section for a second ``# %%`` cell with its own heading."""
+    section = nodes.section(ids=[title.lower().replace(' ', '-')])
+    section += nodes.title('', title)
+    section += nodes.paragraph('', 'Some prose.')
+    code_block = nodes.literal_block('', code)
+    code_block['language'] = 'Python'
+    section += code_block
+    return section
+
+
+def _build_gallery_doctree_with_sibling_sections() -> nodes.document:
+    """Build a doctree shaped like a real multi-``# %%``-cell gallery page.
+
+    The regression case: each ``# %%`` cell with its own heading becomes a
+    *sibling* section at the document level (confirmed against a real
+    sphinx-gallery build), not nested inside the page's outer section --
+    this is what _gallery_body/_process_gallery_page must span across
+    rather than just the first section's children.
+    """
+    doctree = _parse('')
+    doctree += _gallery_note()
+
+    first = nodes.section(classes=['sphx-glr-example-title'], ids=['ex'])
+    first += nodes.title('', 'An example')
+    first += nodes.paragraph('', 'Intro text.')
+    import_block = nodes.literal_block('', 'import sys')
+    import_block['language'] = 'Python'
+    first += import_block
+    doctree += first
+
+    second = _gallery_subsection('Second cell', 'x = 1')
+    second += _gallery_timing()
+    second += _gallery_footer()
+    second += _gallery_signature()
+    doctree += second
+
+    return doctree
+
+
+def test_gallery_body_spans_multiple_sibling_sections():
+    doctree = _build_gallery_doctree_with_sibling_sections()
     seac._strip_gallery_furniture(doctree)
-    _parent, start, _end = seac._gallery_body(doctree)
-    assert start == 0
+    parent, start, end = seac._gallery_body(doctree)
+    assert parent is doctree
+    spanned = doctree.children[start:end]
+    assert len(spanned) == 2  # both sibling sections included
+    assert all(isinstance(c, nodes.section) for c in spanned)
 
 
 def test_gallery_body_falls_back_to_document_without_a_section():
@@ -1313,20 +1378,21 @@ def test_process_gallery_page_strips_furniture_and_inserts_download(tmp_path: Pa
     doctree = _build_gallery_doctree()
     seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
 
-    section = next(doctree.findall(nodes.section))
     assert not any(seac._has_class(n, seac._GALLERY_FOOTER_CLASS) for n in doctree.findall())
     assert not any(seac._has_class(n, seac._GALLERY_NOTE_CLASS) for n in doctree.findall())
     # timing/signature stay on the rendered page ...
     assert any(seac._has_class(n, seac._GALLERY_TIMING_CLASS) for n in doctree.findall())
     assert any(seac._has_class(n, seac._GALLERY_SIGNATURE_CLASS) for n in doctree.findall())
 
+    # 'bottom' -> a sibling of the section, at the end of the document
     download_paragraphs = [
         n
-        for n in section.children
+        for n in doctree.children
         if isinstance(n, nodes.paragraph)
         and any(isinstance(c, addnodes.download_reference) for c in n.children)
     ]
     assert len(download_paragraphs) == 1
+    assert doctree.children[-1] is download_paragraphs[0]
     reference = download_paragraphs[0].children[0]
     assert reference['filename'].endswith('/plot_minimal.py')
 
@@ -1334,6 +1400,21 @@ def test_process_gallery_page_strips_furniture_and_inserts_download(tmp_path: Pa
     written = (tmp_path / '_downloads' / reference['filename']).read_text(encoding='utf-8')
     assert 'Total running time' not in written
     assert 'Gallery generated by Sphinx-Gallery' not in written
+
+
+def test_process_gallery_page_includes_code_from_sibling_sections(tmp_path: Path):
+    # the actual bug this guards against: a "# %%" cell with its own
+    # heading becomes a *sibling* section (not nested inside the first),
+    # and its code must not be silently dropped
+    app = Mock(outdir=str(tmp_path))
+    doctree = _build_gallery_doctree_with_sibling_sections()
+    seac._process_gallery_page(app, 'auto_examples/plot_multi', doctree, 'bottom', ['py'], None)
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    content = written.read_text(encoding='utf-8')
+    assert 'import sys' in content
+    assert '# Second cell' in content  # the sibling section's own title
+    assert 'x = 1' in content  # the sibling section's own code
 
 
 def test_process_gallery_page_respects_top_position(tmp_path: Path):
@@ -1354,6 +1435,31 @@ def test_process_gallery_page_no_real_code_strips_furniture_but_no_download(tmp_
 
     assert not any(seac._has_class(n, seac._GALLERY_FOOTER_CLASS) for n in doctree.findall())
     assert not any(isinstance(n, addnodes.download_reference) for n in doctree.findall())
+
+
+def test_process_gallery_page_empty_after_stripping_is_a_no_op(tmp_path: Path):
+    # contrived, but defensive: a doctree that's *only* the footer -- once
+    # stripped there's nothing left to span at all
+    app = Mock(outdir=str(tmp_path))
+    doctree = _parse('')
+    doctree += _gallery_footer()
+    seac._process_gallery_page(app, 'page', doctree, 'bottom', ['py'], None)
+    assert not any(isinstance(n, addnodes.download_reference) for n in doctree.findall())
+
+
+def test_process_gallery_page_no_wrapping_section_still_works(tmp_path: Path):
+    # defensive fallback: a gallery footer with no enclosing section at all
+    app = Mock(outdir=str(tmp_path))
+    doctree = _parse('')
+    code_block = nodes.literal_block('', 'x = 1')
+    code_block['language'] = 'Python'
+    doctree += code_block
+    doctree += _gallery_footer()
+
+    seac._process_gallery_page(app, 'weird_page', doctree, 'bottom', ['py'], None)
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert 'x = 1' in written.read_text(encoding='utf-8')
 
 
 def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
