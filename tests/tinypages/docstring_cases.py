@@ -333,7 +333,7 @@ def case_stray_xref_in_doctest_comment():
 def case_regular_xref_for_base_url():
     """Docstring with a plain cross-reference, outside any See Also part.
 
-    With ``sphinx_examples_as_code_base_url`` configured: the .ipynb should
+    With ``sphinx_examples_as_code_conf['base_url']`` configured: the .ipynb should
     turn this into a clickable link; the .py should still omit the link
     entirely (status quo), same as when no base URL is configured at all.
 
