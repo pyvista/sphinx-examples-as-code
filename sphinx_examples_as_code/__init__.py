@@ -494,15 +494,40 @@ def _examples_spans(doctree: nodes.document) -> list[tuple[nodes.Element, int, i
     return spans
 
 
+def _desc_id(desc: addnodes.desc) -> str | None:
+    """Pull the documented object's id (e.g. ``pkg.mod.func``) off a ``desc`` node."""
+    signature = desc.next_node(addnodes.desc_signature)
+    if signature is not None and signature.get('ids'):
+        return signature['ids'][0]
+    return None
+
+
 def _qualified_name_for(node: nodes.Node, docname: str, counter: int) -> str:
     """Best-effort identifier used to name the generated file and its title header."""
     ancestor: nodes.Node | None = node.parent
     while ancestor is not None:
         if isinstance(ancestor, addnodes.desc):
-            signature = ancestor.next_node(addnodes.desc_signature)
-            if signature is not None and signature.get('ids'):
-                return signature['ids'][0]
-        ancestor = ancestor.parent
+            desc_id = _desc_id(ancestor)
+            if desc_id is not None:
+                return desc_id
+        parent = ancestor.parent
+        if parent is not None:
+            # An "Examples" section written as a real RST heading (not a
+            # bare ``.. rubric::``) starts a new docutils section -- one
+            # can't nest inside the ``desc_content`` a numpydoc-rendered
+            # docstring builds it in, so it gets promoted to a sibling of
+            # the object's own ``desc`` node instead (same reason
+            # sphinx-gallery's own "# %%"-headed cells become siblings; see
+            # gallery mode's sibling-section handling). Look for the
+            # nearest ``desc`` immediately preceding it under that shared
+            # parent, closest first.
+            index = parent.index(ancestor)
+            for sibling in reversed(parent.children[:index]):
+                if isinstance(sibling, addnodes.desc):
+                    desc_id = _desc_id(sibling)
+                    if desc_id is not None:
+                        return desc_id
+        ancestor = parent
     base = Path(docname).name or docname
     return f'{base}-example-{counter}'
 

@@ -700,6 +700,46 @@ def test_qualified_name_for_desc_signature_without_ids_falls_back():
     assert seac._qualified_name_for(heading, 'mypage', 2) == 'mypage-example-2'
 
 
+def test_qualified_name_for_examples_section_sibling_of_desc():
+    r"""A real ``Examples\n--------`` heading, not a bare rubric.
+
+    Matches an actual numpydoc-rendered autosummary page: docutils can't
+    nest a new section inside the non-sectioning ``desc_content`` a
+    docstring's other fields render into, so it promotes "Examples" to a
+    section of its own, sitting as a *sibling* of the object's ``desc`` --
+    not an ancestor of the heading the way the plain-rubric case above is.
+    Confirmed against a real pyvista build, where this exact structure
+    produced a nonsensical ``<docname>-example-1`` header for a page that
+    unambiguously documents one function.
+    """
+    page_section = nodes.section()
+    page_section += nodes.title('', 'download_bunny')
+    desc = addnodes.desc()
+    desc += addnodes.desc_signature(ids=['pyvista.examples.downloads.download_bunny'])
+    page_section += desc
+    examples_section = nodes.section()
+    heading = nodes.title('', 'Examples')
+    examples_section += heading
+    page_section += examples_section
+
+    assert (
+        seac._qualified_name_for(heading, 'page', 1) == 'pyvista.examples.downloads.download_bunny'
+    )
+
+
+def test_qualified_name_for_examples_section_sibling_no_desc_falls_back():
+    # a promoted sibling section with nothing resembling a desc anywhere
+    # nearby -- e.g. a plain prose page's own "Examples\n--------" heading
+    page_section = nodes.section()
+    page_section += nodes.title('', 'Some Guide Page')
+    examples_section = nodes.section()
+    heading = nodes.title('', 'Examples')
+    examples_section += heading
+    page_section += examples_section
+
+    assert seac._qualified_name_for(heading, 'mypage', 4) == 'mypage-example-4'
+
+
 # ---------------------------------------------------------------------------
 # _header_segment
 # ---------------------------------------------------------------------------
