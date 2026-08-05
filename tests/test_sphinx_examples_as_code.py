@@ -1400,12 +1400,54 @@ def test_gallery_example_name(docname: str, expected: str):
     assert seac._gallery_example_name(docname) == expected
 
 
+def test_gallery_page_title_extracts_text():
+    section = nodes.section()
+    section += nodes.title('', 'Create Circular Arcs')
+    section += nodes.paragraph('', 'intro')
+    assert seac._gallery_page_title(section) == 'Create Circular Arcs'
+
+
+def test_gallery_page_title_no_title_returns_none():
+    section = nodes.section()
+    section += nodes.paragraph('', 'no title here')
+    assert seac._gallery_page_title(section) is None
+
+
+def test_gallery_page_title_empty_title_returns_none():
+    section = nodes.section()
+    section += nodes.title()
+    assert seac._gallery_page_title(section) is None
+
+
 def test_process_gallery_page_not_a_gallery_page_is_a_no_op(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _parse('Some ordinary page\n\nwith a paragraph.')
     original = doctree.pformat()
     seac._process_gallery_page(app, 'page', doctree, 'bottom', ['py', 'ipynb'], None)
     assert doctree.pformat() == original
+
+
+def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
+    # not "# Examples from plot_minimal" -- gallery mode converts the whole
+    # page, so its own title reads far better than a docname-derived name
+    app = Mock(outdir=str(tmp_path))
+    doctree = _build_gallery_doctree()  # title: 'An example'
+    seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    lines = written.read_text(encoding='utf-8').splitlines()
+    assert lines[0] == '# An example'
+    assert lines[1] == '# ' + '-' * len('An example')
+    assert not lines[0].startswith('# Examples from')
+
+
+def test_process_gallery_page_no_title_falls_back_to_examples_from_header(tmp_path: Path):
+    app = Mock(outdir=str(tmp_path))
+    doctree = _build_gallery_doctree(with_title=False)
+    seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert written.read_text(encoding='utf-8').startswith('# Examples from plot_minimal')
 
 
 def test_process_gallery_page_strips_furniture_and_inserts_download(tmp_path: Path):

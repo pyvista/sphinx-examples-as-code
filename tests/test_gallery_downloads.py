@@ -62,6 +62,35 @@ def _build(tmp_path: Path, *, gallery_downloads: bool | None) -> tuple[int, str,
     return returncode, out, err, html_dir
 
 
+def _is_ours(path: Path) -> bool:
+    """Distinguish our generated file from sphinx-gallery's own same-named one.
+
+    Both write a ``plot_minimal.py``/``.ipynb`` under ``_downloads/<digest>/``
+    -- ours is identifiable structurally, by the title+underline header this
+    extension always starts a generated file with (its first two lines in
+    ``.py``, or its first markdown cell's first two lines in ``.ipynb``): a
+    title line followed by a line of dashes matching that title's length.
+    Gallery mode uses the page's own title there now rather than a fixed
+    "# Examples from ..." prefix, so this can't just check for one fixed
+    string the way it used to.
+    """
+    if path.suffix == '.py':
+        lines = path.read_text(encoding='utf-8').splitlines()
+    else:
+        cells = json.loads(path.read_text(encoding='utf-8'))['cells']
+        # markdown lines carry a trailing hard-break "  " -- strip it before comparing
+        lines = (
+            [line.rstrip() for line in ''.join(cells[0]['source']).splitlines()] if cells else []
+        )
+
+    if len(lines) < 2:
+        return False
+    title, underline = lines[0], lines[1]
+    if path.suffix == '.py':
+        title, underline = title.removeprefix('# '), underline.removeprefix('# ')
+    return bool(title) and underline == '-' * len(title)
+
+
 def test_gallery_downloads_disabled_by_default(tmp_path: Path):
     """With the feature off, sphinx-gallery's own note/footer/timing/signature stay put."""
     returncode, out, err, html_dir = _build(tmp_path, gallery_downloads=None)
@@ -71,14 +100,9 @@ def test_gallery_downloads_disabled_by_default(tmp_path: Path):
     for marker in _GALLERY_FURNITURE_MARKERS:
         assert marker in html, f'{marker!r} unexpectedly missing with the feature disabled'
 
-    # our extension never touched this page, so no "# Examples from" file exists
+    # our extension never touched this page, so none of its downloads are "ours"
     downloads_dir = html_dir / '_downloads'
-    generated = [
-        p
-        for p in downloads_dir.rglob('*.py')
-        if p.read_text(encoding='utf-8').startswith('# Examples from')
-    ]
-    assert not generated
+    assert not any(_is_ours(p) for p in downloads_dir.rglob('*.py'))
 
 
 @pytest.fixture(scope='module')
@@ -113,21 +137,6 @@ def test_gallery_downloads_enabled_inserts_our_own_links(gallery_build: tuple[Pa
     assert 'Download Jupyter notebook' in html
 
 
-def _is_ours(path: Path) -> bool:
-    """Distinguish our generated file from sphinx-gallery's own same-named one.
-
-    Both write a ``plot_minimal.py``/``.ipynb`` under ``_downloads/<digest>/``
-    -- ours is identifiable by the ``# Examples from ...`` header this
-    extension always starts a generated file with (as its first markdown
-    cell, for ``.ipynb``).
-    """
-    if path.suffix == '.py':
-        return path.read_text(encoding='utf-8').startswith('# Examples from')
-    notebook = json.loads(path.read_text(encoding='utf-8'))
-    first_cell_source = ''.join(notebook['cells'][0]['source'])
-    return first_cell_source.startswith('Examples from')
-
-
 def _generated(html_dir: Path, suffix: str) -> Path:
     matches = [p for p in (html_dir / '_downloads').rglob(f'*{suffix}') if _is_ours(p)]
     assert len(matches) == 1, f'expected exactly one generated {suffix}, got {matches}'
@@ -138,7 +147,10 @@ def test_gallery_downloads_py_content(gallery_build: tuple[Path, str]):
     html_dir, _html = gallery_build
     src = _generated(html_dir, '.py').read_text(encoding='utf-8')
 
-    assert src.startswith('# Examples from plot_minimal')
+    # the page's own title, not a generic "Examples from <docname>" header
+    assert src.startswith(
+        '# A minimal gallery example\n# ' + '-' * len('A minimal gallery example')
+    )
     assert 'x = 1' in src
     assert 'y = 2' in src
     assert 'print(x + y)' in src

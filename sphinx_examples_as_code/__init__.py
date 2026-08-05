@@ -707,6 +707,7 @@ def _build_download_entries(
     app: Sphinx,
     docname: str,
     name: str,
+    header: Segment,
     nodes_in_span: list[nodes.Node],
     formats: list[str],
     footer: str | None,
@@ -716,8 +717,9 @@ def _build_download_entries(
     Returns ``(label, rel_path)`` entries for whichever formats are
     requested -- empty if the span has no real code, or ``formats`` itself
     is empty. Shared by the docstring-Examples path and gallery-page path;
-    the only difference between them is how ``nodes_in_span`` and ``name``
-    get built.
+    the only differences between them are how ``nodes_in_span``/``name``
+    get built, and what ``header`` says (see ``_header_segment`` vs.
+    ``_process_gallery_page``'s own title handling).
     """
     py_ctx = _RenderContext(app=app, docname=docname, fmt='py')
     py_segments = _build_segments(nodes_in_span, py_ctx)
@@ -725,7 +727,7 @@ def _build_download_entries(
     if not any(kind == 'code' for kind, _lines in py_segments):
         return []
 
-    py_segments_full = [_header_segment(name), *py_segments, *_footer_segment(footer, 'py')]
+    py_segments_full = [header, *py_segments, *_footer_segment(footer, 'py')]
     source = '\n'.join(_join_segments(py_segments_full)).rstrip() + '\n\n'
 
     if not _has_real_code(source):
@@ -742,7 +744,7 @@ def _build_download_entries(
             ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
             ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
             ipynb_segments_full = [
-                _header_segment(name),
+                header,
                 *ipynb_segments,
                 *_footer_segment(footer, 'ipynb'),
             ]
@@ -772,7 +774,9 @@ def _process_span(
         nodes_in_span.append(external_see_also)
 
     name = _qualified_name_for(heading, docname, counter)
-    entries = _build_download_entries(app, docname, name, nodes_in_span, formats, footer)
+    entries = _build_download_entries(
+        app, docname, name, _header_segment(name), nodes_in_span, formats, footer
+    )
     if not entries:
         return
 
@@ -840,6 +844,14 @@ def _gallery_example_name(docname: str) -> str:
     return Path(docname).name or docname
 
 
+def _gallery_page_title(section: nodes.section) -> str | None:
+    """Extract a gallery page's own title text, if it has one."""
+    title_node = next((child for child in section.children if isinstance(child, nodes.title)), None)
+    if title_node is None:
+        return None
+    return title_node.astext().strip() or None
+
+
 def _process_gallery_page(
     app: Sphinx,
     docname: str,
@@ -869,13 +881,21 @@ def _process_gallery_page(
     # as sections, titles and all -- see _convert_node's nodes.section case.
     first, rest = top_level[0], top_level[1:]
     if isinstance(first, nodes.section):
+        title = _gallery_page_title(first)
         nodes_in_span = [child for child in first.children if not isinstance(child, nodes.title)]
         nodes_in_span.extend(rest)
     else:
+        title = None
         nodes_in_span = top_level
 
     name = _gallery_example_name(docname)
-    entries = _build_download_entries(app, docname, name, nodes_in_span, formats, footer)
+    # The page's own title reads far better as the header than "Examples
+    # from <docname-derived name>": gallery mode converts the whole page,
+    # not an Examples section carved out of a larger docstring, so there's
+    # no "from" framing to make. Falls back to the usual header on the off
+    # chance the page has no title of its own.
+    header = _title_underline_segment(title) if title else _header_segment(name)
+    entries = _build_download_entries(app, docname, name, header, nodes_in_span, formats, footer)
     if not entries:
         return
 
