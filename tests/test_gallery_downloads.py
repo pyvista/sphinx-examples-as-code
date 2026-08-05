@@ -150,6 +150,13 @@ def test_gallery_downloads_py_content(gallery_build: tuple[Path, str]):
     # the "%%" cell's prose
     assert 'Some prose in its own cell' in src
 
+    # regression check: a "# %%" cell with its own heading becomes a
+    # *sibling* section at the document level, not nested inside the page's
+    # own section -- its code must not be silently dropped
+    assert '# A headed cell' in src
+    assert 'z = 3' in src
+    assert 'print(z)' in src
+
     # captured stdout ("3") from actually running the script must not leak in,
     # nor any sphinx-gallery furniture text
     assert '# 3' not in src
@@ -167,6 +174,7 @@ def test_gallery_downloads_ipynb_is_valid(gallery_build: tuple[Path, str]):
     all_source = ''.join(''.join(cell['source']) for cell in text['cells'])
     assert 'x = 1' in all_source
     assert 'print(x + y)' in all_source
+    assert 'z = 3' in all_source  # from the sibling ("# %%" headed) section
 
 
 def test_gallery_downloads_generated_py_executes(gallery_build: tuple[Path, str]):
