@@ -11,6 +11,7 @@ dev = [
   'pytest-cov',
   'sphinx',
   'sphinx-design',
+  'sphinx-gallery>=0.21.0',
   'trame-pyvista',
 ]
 
@@ -92,6 +93,9 @@ ignore = ['D203', 'D211', 'D213']
 [tool.ruff.lint.per-file-ignores]
 '*/conf.py' = ['E402']
 'tests/*' = ['D103']
+# sphinx-gallery example scripts: the module docstring is an RST page title
+# (title line + underline), not prose -- pydocstyle's summary-line rules don't apply.
+'tests/gallery_fixture/examples/*' = ['D205', 'D400', 'D415', 'T201']
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
