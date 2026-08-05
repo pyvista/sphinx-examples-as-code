@@ -20,6 +20,8 @@ from docutils import nodes
 from sphinx import addnodes
 from sphinx.errors import ConfigError
 
+from ._version import __version__
+
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
     from sphinx.config import Config
@@ -885,7 +887,7 @@ def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     app.add_config_value('sphinx_examples_as_code_conf', {}, 'env')
 
     return {
-        'version': '0.1',
+        'version': __version__,
         'parallel_read_safe': True,
         'parallel_write_safe': True,
     }

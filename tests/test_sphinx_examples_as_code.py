@@ -997,6 +997,7 @@ def test_setup_registers_connect_and_config():
     app.connect.assert_any_call('doctree-resolved', seac._process_doctree)
     app.connect.assert_any_call('config-inited', seac._finalize_conf)
     app.add_config_value.assert_called_once_with('sphinx_examples_as_code_conf', {}, 'env')
+    assert result['version'] == seac.__version__
     assert result['parallel_read_safe'] is True
     assert result['parallel_write_safe'] is True
 
