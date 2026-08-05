@@ -363,10 +363,13 @@ def test_convert_literal_block_capitalized_python():
 
 
 def test_convert_literal_block_non_python_becomes_comment():
+    # 'directive' kind (not 'text'): set off with blank lines on both sides,
+    # since it's a distinct preformatted block in its original source, not
+    # ordinary prose that happens to sit next to it
     node = nodes.literal_block('', 'echo hi')
     node['language'] = 'bash'
     segments = seac._convert_literal_block(node)
-    assert segments == [('text', ['# echo hi'])]
+    assert segments == [('directive', ['# echo hi'])]
 
 
 def test_convert_literal_block_empty_non_python():
@@ -532,6 +535,15 @@ def test_convert_node_skip_subtree_class():
     assert seac._convert_node(node, _ctx()) == []
 
 
+def test_convert_node_drops_sphinx_tags_paragraph():
+    # sphinx-tags' ".. tags:: load" compiles to a plain paragraph with
+    # class "tags" -- site navigation, not documentation content
+    node = nodes.paragraph(classes=['tags'])
+    node += nodes.inline('', 'Tags: ')
+    node += nodes.reference('', 'load', refuri='_tags/load.html')
+    assert seac._convert_node(node, _ctx()) == []
+
+
 def test_convert_node_ignored_type():
     doctree = _parse('.. image:: foo.png')
     assert seac._convert_node(doctree[0], _ctx()) == []
@@ -555,9 +567,9 @@ def test_convert_node_empty_paragraph_returns_empty():
     assert seac._convert_node(nodes.paragraph(), _ctx()) == []
 
 
-def test_convert_node_section_title_becomes_comment_and_children_recurse():
-    # gallery mode: a "# %%" cell's own sibling section -- its title falls
-    # through to the plain-text case like any other heading text, and its
+def test_convert_node_section_title_becomes_heading_and_children_recurse():
+    # gallery mode: a "# %%" cell's own sibling section -- its title gets
+    # the same title+underline treatment as the file's own header, and its
     # other children (prose, code, ...) get converted normally
     section = nodes.section()
     section += nodes.title('', 'A subsection')
@@ -567,7 +579,7 @@ def test_convert_node_section_title_becomes_comment_and_children_recurse():
     section += code_block
 
     assert seac._convert_node(section, _ctx()) == [
-        ('text', ['# A subsection']),
+        ('directive', ['# A subsection', '# ------------']),
         ('text', ['# prose here']),
         ('code', ['x = 1']),
     ]
@@ -717,6 +729,29 @@ def test_header_segment_format():
     assert kind == 'directive'
     assert lines[0] == '# Examples from pyvista.read'
     assert lines[1] == '# ' + '-' * len('Examples from pyvista.read')
+
+
+# ---------------------------------------------------------------------------
+# _title_underline_segment
+# ---------------------------------------------------------------------------
+
+
+def test_title_underline_segment_format():
+    kind, lines = seac._title_underline_segment('A Title')
+    assert kind == 'directive'
+    assert lines == ['# A Title', '# -------']
+
+
+def test_convert_node_title_uses_underline_treatment():
+    # a standalone title, as reached via a gallery sibling section
+    title = nodes.title('', 'A subsection')
+    assert seac._convert_node(title, _ctx()) == [
+        ('directive', ['# A subsection', '# ------------'])
+    ]
+
+
+def test_convert_node_empty_title_returns_empty():
+    assert seac._convert_node(nodes.title(), _ctx()) == []
 
 
 # ---------------------------------------------------------------------------
