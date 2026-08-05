@@ -19,6 +19,8 @@ import pytest
 from test_tinypages import _run_sphinx_build
 from test_tinypages import _sphinx_build_cmd
 
+import sphinx_examples_as_code as seac
+
 FIXTURE_DIR = Path(__file__).parent / 'gallery_fixture'
 
 # Markers unique to sphinx-gallery's own injected note/footer/timing/signature
@@ -203,6 +205,20 @@ def test_gallery_downloads_ipynb_is_valid(gallery_build: tuple[Path, str]):
     assert 'x = 1' in all_source
     assert 'print(x + y)' in all_source
     assert 'z = 3' in all_source  # from the sibling ("# %%" headed) section
+
+
+def test_gallery_downloads_footer_is_its_own_dedicated_ipynb_cell(gallery_build: tuple[Path, str]):
+    """Since the footer directly follows a code cell here, it starts a new one.
+
+    Confirms the separator (see test_tinypages.py for the "shares a cell"
+    case) can also be a cell's very first line, not just mid-cell.
+    """
+    html_dir, _html = gallery_build
+    notebook = json.loads(_generated(html_dir, '.ipynb').read_text(encoding='utf-8'))
+    footer_cell = notebook['cells'][-1]
+    assert footer_cell['cell_type'] == 'markdown'
+    first_line = footer_cell['source'][0].rstrip()
+    assert first_line == seac._FOOTER_SEPARATOR
 
 
 def test_gallery_downloads_sibling_section_heading_is_markdown_in_ipynb(

@@ -500,11 +500,22 @@ def _header_segment(qualified_name: str) -> Segment:
     return _title_underline_segment(f'Examples from {qualified_name}')
 
 
+# A plain divider, not tied to any specific text's length the way a title
+# underline is (see _title_underline_segment) -- dashes specifically, not
+# e.g. '=', since '=' isn't a valid CommonMark thematic-break character:
+# once the '# ' prefix is stripped for a markdown cell, a lone dash line
+# preceded by a blank line renders as a real <hr> in .ipynb, marking the
+# footer as trailing boilerplate rather than more comment text that reads
+# like it's part of the example itself.
+_FOOTER_SEPARATOR = '-' * 70
+
+
 def _footer_segment(footer: str | None, fmt: str, app: Sphinx, docname: str) -> list[Segment]:
     """Build the footer directive segment, if a footer is configured.
 
     Empty (0 or 1 elements, not a bare ``Segment | None``) so callers can
     just splat it into a segment list like ``_header_segment``'s result.
+    Starts with ``_FOOTER_SEPARATOR`` -- see its comment for why.
 
     Parsed as RST -- the same way any other prose in this extension is --
     rather than treated as a special case: a hyperlink written as
@@ -527,7 +538,7 @@ def _footer_segment(footer: str | None, fmt: str, app: Sphinx, docname: str) -> 
     for node in doctree.children:
         segments.extend(_convert_node(node, ctx))
     lines = _join_segments(segments)
-    return [('directive', lines)] if lines else []
+    return [('directive', [f'# {_FOOTER_SEPARATOR}', *lines])] if lines else []
 
 
 def _strip_comment_prefix(line: str) -> str:
