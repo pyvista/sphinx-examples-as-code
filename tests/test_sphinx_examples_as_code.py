@@ -37,7 +37,7 @@ def _ctx(
 ):
     """Build a minimal ``_RenderContext`` with a mocked Sphinx app."""
     app = Mock()
-    app.config.sphinx_examples_as_code_conf = {'base_url': base_url}
+    app.config.html_baseurl = base_url
     app.builder.get_target_uri.side_effect = lambda d: f'{d}.html'
     return seac._RenderContext(
         app=app, docname=docname, fmt=fmt, in_see_also=in_see_also, in_footer=in_footer
@@ -783,7 +783,7 @@ def test_convert_node_empty_title_returns_empty():
 def _footer_app(*, base_url: str | None = None) -> Mock:
     """Build a minimal mocked Sphinx app, sufficient for ``_footer_segment``."""
     app = Mock()
-    app.config.sphinx_examples_as_code_conf = {'base_url': base_url}
+    app.config.html_baseurl = base_url
     app.builder.get_target_uri.side_effect = lambda d: f'{d}.html'
     return app
 
@@ -1098,7 +1098,19 @@ def test_process_span_no_code_no_download(tmp_path: Path):
         '.. rubric:: Examples\n\njust prose, no code'
     )
     original_len = len(parent.children)
-    seac._process_span(app, 'page', parent, start, end, heading, 1, 'bottom', ['py', 'ipynb'], None)
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py', 'ipynb'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
     assert len(parent.children) == original_len
 
 
@@ -1110,7 +1122,19 @@ def test_process_span_code_segment_but_not_real_code(tmp_path: Path):
         '.. rubric:: Examples\n\n>>> # just a comment'
     )
     original_len = len(parent.children)
-    seac._process_span(app, 'page', parent, start, end, heading, 1, 'bottom', ['py', 'ipynb'], None)
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py', 'ipynb'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
     assert len(parent.children) == original_len
 
 
@@ -1119,7 +1143,19 @@ def test_process_span_inserts_at_bottom(tmp_path: Path):
     _doctree, parent, start, end, heading = _build_examples_doctree(
         '.. rubric:: Examples\n\n>>> x = 1'
     )
-    seac._process_span(app, 'page', parent, start, end, heading, 1, 'bottom', ['py', 'ipynb'], None)
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py', 'ipynb'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
     assert isinstance(parent.children[end], nodes.paragraph)
 
 
@@ -1128,7 +1164,19 @@ def test_process_span_inserts_at_top(tmp_path: Path):
     _doctree, parent, start, end, heading = _build_examples_doctree(
         '.. rubric:: Examples\n\n>>> x = 1'
     )
-    seac._process_span(app, 'page', parent, start, end, heading, 1, 'top', ['py', 'ipynb'], None)
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'top',
+        ['py', 'ipynb'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
     assert isinstance(parent.children[start], nodes.paragraph)
 
 
@@ -1146,7 +1194,19 @@ def test_process_span_includes_external_see_also(tmp_path: Path):
     start = parent.index(heading) + 1
     end = seac._span_from(parent, start)
 
-    seac._process_span(app, 'page', parent, start, end, heading, 1, 'bottom', ['py'], None)
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     content = written.read_text()
@@ -1160,7 +1220,17 @@ def test_process_span_appends_footer_with_blank_line_before(tmp_path: Path):
         '.. rubric:: Examples\n\n>>> x = 1'
     )
     seac._process_span(
-        app, 'page', parent, start, end, heading, 1, 'bottom', ['py'], 'Generated footer text.'
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py'],
+        'Generated footer text.',
+        seac._DEFAULT_LINK_LABELS,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -1175,7 +1245,19 @@ def test_process_span_no_footer_configured_omits_it(tmp_path: Path):
     _doctree, parent, start, end, heading = _build_examples_doctree(
         '.. rubric:: Examples\n\n>>> x = 1'
     )
-    seac._process_span(app, 'page', parent, start, end, heading, 1, 'bottom', ['py'], None)
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     assert 'Generated' not in written.read_text()
@@ -1197,6 +1279,7 @@ def test_process_span_footer_in_notebook_is_linkified(tmp_path: Path):
         'bottom',
         ['ipynb'],
         'Report to https://example.com/issues',
+        seac._DEFAULT_LINK_LABELS,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.ipynb'))
@@ -1223,7 +1306,19 @@ def test_process_span_respects_formats_config(
         '.. rubric:: Examples\n\n>>> x = 1'
     )
     original_len = len(parent.children)
-    seac._process_span(app, 'page', parent, start, end, heading, 1, 'bottom', formats, None)
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        formats,
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
 
     if not expected_extensions:
         assert len(parent.children) == original_len
@@ -1236,6 +1331,22 @@ def test_process_span_respects_formats_config(
     assert len(references) == len(expected_extensions)
     for reference, ext in zip(references, expected_extensions, strict=True):
         assert reference['filename'].endswith(ext)
+
+
+def test_process_span_custom_link_labels_used_in_download_node(tmp_path: Path):
+    app = Mock(outdir=str(tmp_path))
+    _doctree, parent, start, end, heading = _build_examples_doctree(
+        '.. rubric:: Examples\n\n>>> x = 1'
+    )
+    custom_labels = {'py': 'Get the script', 'ipynb': 'Get the notebook'}
+    seac._process_span(
+        app, 'page', parent, start, end, heading, 1, 'bottom', ['py', 'ipynb'], None, custom_labels
+    )
+
+    text = parent.children[end].astext()
+    assert 'Get the script' in text
+    assert 'Get the notebook' in text
+    assert 'Download Python source code' not in text
 
 
 def test_process_doctree_skips_when_no_download_support():
@@ -1259,6 +1370,7 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
         'formats': ['py', 'ipynb'],
         'gallery_downloads': False,
         'footer': None,
+        'link_labels': seac._DEFAULT_LINK_LABELS,
     }
 
     doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
@@ -1507,7 +1619,9 @@ def test_process_gallery_page_not_a_gallery_page_is_a_no_op(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _parse('Some ordinary page\n\nwith a paragraph.')
     original = doctree.pformat()
-    seac._process_gallery_page(app, 'page', doctree, 'bottom', ['py', 'ipynb'], None)
+    seac._process_gallery_page(
+        app, 'page', doctree, 'bottom', ['py', 'ipynb'], None, seac._DEFAULT_LINK_LABELS
+    )
     assert doctree.pformat() == original
 
 
@@ -1516,7 +1630,15 @@ def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
     # page, so its own title reads far better than a docname-derived name
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree()  # title: 'An example'
-    seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
+    seac._process_gallery_page(
+        app,
+        'auto_examples/plot_minimal',
+        doctree,
+        'bottom',
+        ['py'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     lines = written.read_text(encoding='utf-8').splitlines()
@@ -1528,7 +1650,15 @@ def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
 def test_process_gallery_page_no_title_falls_back_to_examples_from_header(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree(with_title=False)
-    seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
+    seac._process_gallery_page(
+        app,
+        'auto_examples/plot_minimal',
+        doctree,
+        'bottom',
+        ['py'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     assert written.read_text(encoding='utf-8').startswith('# Examples from plot_minimal')
@@ -1537,7 +1667,15 @@ def test_process_gallery_page_no_title_falls_back_to_examples_from_header(tmp_pa
 def test_process_gallery_page_strips_furniture_and_inserts_download(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree()
-    seac._process_gallery_page(app, 'auto_examples/plot_minimal', doctree, 'bottom', ['py'], None)
+    seac._process_gallery_page(
+        app,
+        'auto_examples/plot_minimal',
+        doctree,
+        'bottom',
+        ['py'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+    )
 
     assert not any(seac._has_class(n, seac._GALLERY_FOOTER_CLASS) for n in doctree.findall())
     assert not any(seac._has_class(n, seac._GALLERY_NOTE_CLASS) for n in doctree.findall())
@@ -1569,7 +1707,9 @@ def test_process_gallery_page_includes_code_from_sibling_sections(tmp_path: Path
     # and its code must not be silently dropped
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree_with_sibling_sections()
-    seac._process_gallery_page(app, 'auto_examples/plot_multi', doctree, 'bottom', ['py'], None)
+    seac._process_gallery_page(
+        app, 'auto_examples/plot_multi', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+    )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     content = written.read_text(encoding='utf-8')
@@ -1581,7 +1721,9 @@ def test_process_gallery_page_includes_code_from_sibling_sections(tmp_path: Path
 def test_process_gallery_page_respects_top_position(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree()
-    seac._process_gallery_page(app, 'plot_minimal', doctree, 'top', ['py'], None)
+    seac._process_gallery_page(
+        app, 'plot_minimal', doctree, 'top', ['py'], None, seac._DEFAULT_LINK_LABELS
+    )
 
     section = next(doctree.findall(nodes.section))
     # right after the title (index 0), before the intro paragraph
@@ -1592,7 +1734,9 @@ def test_process_gallery_page_respects_top_position(tmp_path: Path):
 def test_process_gallery_page_no_real_code_strips_furniture_but_no_download(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree(with_code=False)
-    seac._process_gallery_page(app, 'plot_minimal', doctree, 'bottom', ['py', 'ipynb'], None)
+    seac._process_gallery_page(
+        app, 'plot_minimal', doctree, 'bottom', ['py', 'ipynb'], None, seac._DEFAULT_LINK_LABELS
+    )
 
     assert not any(seac._has_class(n, seac._GALLERY_FOOTER_CLASS) for n in doctree.findall())
     assert not any(isinstance(n, addnodes.download_reference) for n in doctree.findall())
@@ -1604,7 +1748,9 @@ def test_process_gallery_page_empty_after_stripping_is_a_no_op(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _parse('')
     doctree += _gallery_footer()
-    seac._process_gallery_page(app, 'page', doctree, 'bottom', ['py'], None)
+    seac._process_gallery_page(
+        app, 'page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+    )
     assert not any(isinstance(n, addnodes.download_reference) for n in doctree.findall())
 
 
@@ -1617,7 +1763,9 @@ def test_process_gallery_page_no_wrapping_section_still_works(tmp_path: Path):
     doctree += code_block
     doctree += _gallery_footer()
 
-    seac._process_gallery_page(app, 'weird_page', doctree, 'bottom', ['py'], None)
+    seac._process_gallery_page(
+        app, 'weird_page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+    )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     assert 'x = 1' in written.read_text(encoding='utf-8')
@@ -1631,6 +1779,7 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
         'formats': ['py'],
         'gallery_downloads': False,
         'footer': None,
+        'link_labels': seac._DEFAULT_LINK_LABELS,
     }
 
     doctree = _build_gallery_doctree()
@@ -1649,6 +1798,7 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
         'formats': ['py'],
         'gallery_downloads': True,
         'footer': None,
+        'link_labels': seac._DEFAULT_LINK_LABELS,
     }
 
     doctree = _build_gallery_doctree()
@@ -1659,49 +1809,49 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# _normalize_base_url
+# _normalized_html_baseurl
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_base_url_none_is_a_no_op():
-    assert seac._normalize_base_url(None) is None
+def _app_with_baseurl(base_url: str | None) -> Mock:
+    app = Mock()
+    app.config.html_baseurl = base_url
+    return app
 
 
-def test_normalize_base_url_empty_string_is_a_no_op():
-    assert seac._normalize_base_url('') is None
+def test_normalized_html_baseurl_unset_is_none():
+    assert seac._normalized_html_baseurl(_app_with_baseurl(None)) is None
 
 
-def test_normalize_base_url_missing_scheme_raises():
-    with pytest.raises(ConfigError, match='does not look like a valid absolute URL'):
-        seac._normalize_base_url('docs.example.com/')
+def test_normalized_html_baseurl_empty_string_is_none():
+    assert seac._normalized_html_baseurl(_app_with_baseurl('')) is None
 
 
-def test_normalize_base_url_garbage_raises():
-    with pytest.raises(ConfigError):
-        seac._normalize_base_url('not a url at all')
+def test_normalized_html_baseurl_missing_scheme_is_none():
+    assert seac._normalized_html_baseurl(_app_with_baseurl('docs.example.com/')) is None
 
 
-def test_normalize_base_url_non_http_scheme_raises():
-    with pytest.raises(ConfigError):
-        seac._normalize_base_url('ftp://docs.example.com/')
+def test_normalized_html_baseurl_garbage_is_none():
+    assert seac._normalized_html_baseurl(_app_with_baseurl('not a url at all')) is None
 
 
-def test_normalize_base_url_adds_missing_trailing_slash():
-    assert (
-        seac._normalize_base_url('https://docs.example.com/en/stable')
-        == 'https://docs.example.com/en/stable/'
-    )
+def test_normalized_html_baseurl_non_http_scheme_is_none():
+    assert seac._normalized_html_baseurl(_app_with_baseurl('ftp://docs.example.com/')) is None
 
 
-def test_normalize_base_url_leaves_trailing_slash_alone():
-    assert (
-        seac._normalize_base_url('https://docs.example.com/en/stable/')
-        == 'https://docs.example.com/en/stable/'
-    )
+def test_normalized_html_baseurl_adds_missing_trailing_slash():
+    app = _app_with_baseurl('https://docs.example.com/en/stable')
+    assert seac._normalized_html_baseurl(app) == 'https://docs.example.com/en/stable/'
 
 
-def test_normalize_base_url_bare_domain_gets_trailing_slash():
-    assert seac._normalize_base_url('https://docs.example.com') == 'https://docs.example.com/'
+def test_normalized_html_baseurl_leaves_trailing_slash_alone():
+    app = _app_with_baseurl('https://docs.example.com/en/stable/')
+    assert seac._normalized_html_baseurl(app) == 'https://docs.example.com/en/stable/'
+
+
+def test_normalized_html_baseurl_bare_domain_gets_trailing_slash():
+    app = _app_with_baseurl('https://docs.example.com')
+    assert seac._normalized_html_baseurl(app) == 'https://docs.example.com/'
 
 
 # ---------------------------------------------------------------------------
@@ -1737,10 +1887,6 @@ def test_coerce_conf_value_link_position_string_passes_through():
     assert seac._coerce_conf_value('link_position', 'bottom') == 'bottom'
 
 
-def test_coerce_conf_value_base_url_string_passes_through():
-    assert seac._coerce_conf_value('base_url', 'https://example.com/') == 'https://example.com/'
-
-
 # ---------------------------------------------------------------------------
 # _finalize_conf
 # ---------------------------------------------------------------------------
@@ -1758,7 +1904,6 @@ def test_finalize_conf_partial_dict_keeps_the_rest_default():
     conf = config.sphinx_examples_as_code_conf
     assert conf['link_position'] == 'bottom'
     assert conf['formats'] == ['py', 'ipynb']
-    assert conf['base_url'] is None
     assert conf['gallery_downloads'] is False
     assert conf['footer'] == seac._DEFAULT_FOOTER
 
@@ -1793,7 +1938,7 @@ def test_finalize_conf_unknown_key_raises():
 
 def test_finalize_conf_unknown_key_error_lists_valid_keys():
     config = Mock(sphinx_examples_as_code_conf={'nope': 1})
-    with pytest.raises(ConfigError, match='base_url'):
+    with pytest.raises(ConfigError, match='link_position'):
         seac._finalize_conf(Mock(), config)
 
 
@@ -1807,15 +1952,35 @@ def test_finalize_conf_coerces_cli_override_style_strings():
     assert conf['gallery_downloads'] is True
 
 
-def test_finalize_conf_normalizes_base_url():
+def test_finalize_conf_base_url_is_an_unknown_key():
     config = Mock(sphinx_examples_as_code_conf={'base_url': 'https://docs.example.com'})
+    with pytest.raises(ConfigError, match=r'unknown key\(s\).*base_url'):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_link_labels_defaults_when_unset():
+    config = Mock(sphinx_examples_as_code_conf={})
     seac._finalize_conf(Mock(), config)
-    assert config.sphinx_examples_as_code_conf['base_url'] == 'https://docs.example.com/'
+    assert config.sphinx_examples_as_code_conf['link_labels'] == seac._DEFAULT_LINK_LABELS
 
 
-def test_finalize_conf_invalid_base_url_raises():
-    config = Mock(sphinx_examples_as_code_conf={'base_url': 'not a url'})
-    with pytest.raises(ConfigError, match='does not look like a valid absolute URL'):
+def test_finalize_conf_link_labels_partial_override_keeps_other_default():
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'py': 'Get the script'}})
+    seac._finalize_conf(Mock(), config)
+    link_labels = config.sphinx_examples_as_code_conf['link_labels']
+    assert link_labels['py'] == 'Get the script'
+    assert link_labels['ipynb'] == seac._DEFAULT_LINK_LABELS['ipynb']
+
+
+def test_finalize_conf_link_labels_not_a_dict_raises():
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': 'nope'})
+    with pytest.raises(ConfigError, match=r"link_labels'\] must be a dict"):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_link_labels_unknown_format_key_raises():
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'pdf': 'Download PDF'}})
+    with pytest.raises(ConfigError, match=r"link_labels'\] has unknown key\(s\).*pdf"):
         seac._finalize_conf(Mock(), config)
 
 
@@ -1826,6 +1991,13 @@ def test_finalize_conf_does_not_mutate_the_defaults():
     config = Mock(sphinx_examples_as_code_conf={'link_position': 'bottom'})
     seac._finalize_conf(Mock(), config)
     assert original == seac._CONF_DEFAULTS
+
+
+def test_finalize_conf_link_labels_override_does_not_mutate_the_defaults():
+    original = dict(seac._DEFAULT_LINK_LABELS)
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'py': 'Get the script'}})
+    seac._finalize_conf(Mock(), config)
+    assert original == seac._DEFAULT_LINK_LABELS
 
 
 # ---------------------------------------------------------------------------

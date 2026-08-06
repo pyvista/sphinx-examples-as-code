@@ -169,6 +169,21 @@ class _RenderContext:
     in_footer: bool = False
 
 
+def _normalized_html_baseurl(app: Sphinx) -> str | None:
+    """Sphinx's own ``html_baseurl`` config, normalized for use with ``urljoin``.
+
+    ``None`` if unset or not a usable absolute URL. Adds a missing trailing
+    slash.
+    """
+    base_url = app.config.html_baseurl
+    if not base_url:
+        return None
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        return None
+    return base_url if base_url.endswith('/') else base_url + '/'
+
+
 def _resolve_link_url(node: nodes.reference, ctx: _RenderContext) -> str | None:
     """Resolve a reference node's target to an absolute URL, if possible.
 
@@ -181,7 +196,7 @@ def _resolve_link_url(node: nodes.reference, ctx: _RenderContext) -> str | None:
     if refuri and urlsplit(refuri).netloc:
         return refuri  # already absolute (an external hyperlink)
 
-    base_url = ctx.app.config.sphinx_examples_as_code_conf['base_url']
+    base_url = _normalized_html_baseurl(ctx.app)
     if not base_url:
         return None
     current_page_url = urljoin(base_url, ctx.app.builder.get_target_uri(ctx.docname))
@@ -699,12 +714,13 @@ def _write_notebook(app: Sphinx, name: str, notebook: dict) -> str:
     return _write_download_file(app, name, 'ipynb', json.dumps(notebook, indent=1))
 
 
-#: Download link text per format, and the fixed order they're offered in
-#: regardless of how ``sphinx_examples_as_code_conf['formats']`` lists them.
-_FORMAT_LABELS = {
+#: Default download link text per format -- see ``sphinx_examples_as_code_conf['link_labels']``.
+_DEFAULT_LINK_LABELS = {
     'py': 'Download Python source code',
     'ipynb': 'Download Jupyter notebook',
 }
+#: The fixed order formats are offered in, regardless of how
+#: ``sphinx_examples_as_code_conf['formats']`` lists them.
 _FORMAT_ORDER = ('py', 'ipynb')
 
 
@@ -749,6 +765,7 @@ def _build_download_entries(
     nodes_in_span: list[nodes.Node],
     formats: list[str],
     footer: str | None,
+    link_labels: dict[str, str],
 ) -> list[tuple[str, str]]:
     """Convert a span of nodes into written ``.py``/``.ipynb`` files, per ``formats``.
 
@@ -775,7 +792,7 @@ def _build_download_entries(
     for fmt in _FORMAT_ORDER:
         if fmt not in formats:
             continue
-        label = _FORMAT_LABELS[fmt]
+        label = link_labels[fmt]
         if fmt == 'py':
             rel_path = _write_source(app, name, source)
         else:
@@ -807,6 +824,7 @@ def _process_span(
     position: str,
     formats: list[str],
     footer: str | None,
+    link_labels: dict[str, str],
 ) -> None:
     """Convert one Examples span and insert download link(s) if it has real code."""
     nodes_in_span = list(parent.children[start:end])
@@ -816,7 +834,7 @@ def _process_span(
 
     name = _qualified_name_for(heading, docname, counter)
     entries = _build_download_entries(
-        app, docname, name, _header_segment(name), nodes_in_span, formats, footer
+        app, docname, name, _header_segment(name), nodes_in_span, formats, footer, link_labels
     )
     if not entries:
         return
@@ -900,6 +918,7 @@ def _process_gallery_page(
     position: str,
     formats: list[str],
     footer: str | None,
+    link_labels: dict[str, str],
 ) -> None:
     """Replace a sphinx-gallery page's own download footer with converted downloads.
 
@@ -936,7 +955,9 @@ def _process_gallery_page(
     # no "from" framing to make. Falls back to the usual header on the off
     # chance the page has no title of its own.
     header = _title_underline_segment(title) if title else _header_segment(name)
-    entries = _build_download_entries(app, docname, name, header, nodes_in_span, formats, footer)
+    entries = _build_download_entries(
+        app, docname, name, header, nodes_in_span, formats, footer, link_labels
+    )
     if not entries:
         return
 
@@ -960,9 +981,10 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
     position = conf['link_position']
     formats = conf['formats']
     footer = conf['footer']
+    link_labels = conf['link_labels']
 
     if conf['gallery_downloads']:
-        _process_gallery_page(app, docname, doctree, position, formats, footer)
+        _process_gallery_page(app, docname, doctree, position, formats, footer, link_labels)
 
     # Process spans per shared parent, last to first: inserting a download
     # node shifts every later sibling index by one, so this stays correct
@@ -972,7 +994,19 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
     for parent, start, end, heading, counter in sorted(
         numbered_spans, key=lambda s: (id(s[0]), -s[1])
     ):
-        _process_span(app, docname, parent, start, end, heading, counter, position, formats, footer)
+        _process_span(
+            app,
+            docname,
+            parent,
+            start,
+            end,
+            heading,
+            counter,
+            position,
+            formats,
+            footer,
+            link_labels,
+        )
 
 
 # One line, one link: a second sentence pointing at the issue tracker read
@@ -989,31 +1023,10 @@ _DEFAULT_FOOTER = (
 _CONF_DEFAULTS: dict[str, object] = {
     'link_position': 'top',
     'formats': ['py', 'ipynb'],
-    'base_url': None,
     'gallery_downloads': False,
     'footer': _DEFAULT_FOOTER,
+    'link_labels': _DEFAULT_LINK_LABELS,
 }
-
-
-def _normalize_base_url(base_url: str | None) -> str | None:
-    """Validate and normalize a ``base_url`` value.
-
-    Catches two common typos loudly instead of silently generating wrong
-    links: a missing scheme (parses with no netloc at all), and a subpath
-    with no trailing slash (``urljoin`` would drop the last segment).
-    """
-    if not base_url:
-        return None
-
-    parsed = urlsplit(base_url)
-    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
-        msg = (
-            f"sphinx_examples_as_code_conf['base_url']={base_url!r} does not look "
-            "like a valid absolute URL (expected something like 'https://docs.example.com/')."
-        )
-        raise ConfigError(msg)
-
-    return base_url if base_url.endswith('/') else base_url + '/'
 
 
 def _coerce_conf_value(key: str, value: object) -> object:
@@ -1039,7 +1052,27 @@ def _coerce_conf_value(key: str, value: object) -> object:
             f"sphinx_examples_as_code_conf['gallery_downloads'] must be '0' or '1', got {value!r}."
         )
         raise ConfigError(msg)
-    return value  # link_position, base_url, footer: a string is already the real type
+    return value  # link_position, footer: a string is already the real type
+
+
+def _merged_link_labels(value: object) -> dict[str, str]:
+    """Merge a user-provided ``link_labels`` override over the defaults.
+
+    A partial override (e.g. just ``{'py': 'Get the script'}``) only changes
+    that one format's label; any not given keep their default.
+    """
+    if not isinstance(value, dict):
+        msg = f"sphinx_examples_as_code_conf['link_labels'] must be a dict, got {value!r}."
+        raise ConfigError(msg)
+    unknown = sorted(set(value) - set(_DEFAULT_LINK_LABELS))
+    if unknown:
+        valid = ', '.join(sorted(_DEFAULT_LINK_LABELS))
+        msg = (
+            f"sphinx_examples_as_code_conf['link_labels'] has unknown key(s) {unknown} "
+            f'(valid keys: {valid}).'
+        )
+        raise ConfigError(msg)
+    return {**_DEFAULT_LINK_LABELS, **value}
 
 
 def _finalize_conf(_app: Sphinx, config: Config) -> None:
@@ -1059,7 +1092,7 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
 
     merged = dict(_CONF_DEFAULTS)
     merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
-    merged['base_url'] = _normalize_base_url(merged['base_url'])
+    merged['link_labels'] = _merged_link_labels(merged['link_labels'])
     config.sphinx_examples_as_code_conf = merged
 
 
