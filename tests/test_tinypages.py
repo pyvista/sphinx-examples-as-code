@@ -459,7 +459,7 @@ def test_formats_config_selection(
 def test_base_url_unset_no_links_anywhere(
     built: tuple[Path, list[Path]], built_notebooks: list[Path]
 ):
-    """Default (``html_baseurl`` unset): no links anywhere, in either format -- the status quo."""
+    """Default (``html_baseurl`` unset): no links anywhere, in either format."""
     for name in (
         'case_regular_xref_for_base_url',
         'case_see_also_directive_for_base_url',
@@ -476,11 +476,10 @@ def test_base_url_unset_no_links_anywhere(
 
 
 def test_base_url_set_resolves_links(tmp_path: Path):
-    # With html_baseurl configured (the standard Sphinx setting, also used
-    # for canonical links/sitemap generation -- not a setting of this
-    # extension's own), See Also parts (in any form) get literal URL text in
-    # .py and clickable markdown links in .ipynb; regular refs only get the
-    # link in .ipynb, and .py stays link-free outside a See Also part.
+    # With html_baseurl configured, See Also parts (in any form) get literal
+    # URL text in .py and clickable markdown links in .ipynb; regular refs
+    # only get the link in .ipynb, and .py stays link-free outside a See
+    # Also part.
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(
@@ -543,15 +542,7 @@ def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
 
 
 def test_html_baseurl_missing_scheme_disables_links_without_failing_build(tmp_path: Path):
-    """A malformed ``html_baseurl`` (no scheme) degrades to "no links", not a build failure.
-
-    Unlike this extension's own config keys, ``html_baseurl`` isn't
-    something it owns or validates -- it's a standard Sphinx setting also
-    used for canonical links/sitemap generation, which Sphinx itself
-    doesn't validate the format of either. Failing the build over it would
-    be presumptuous of a value that might be set (however unusually) for
-    reasons of its own.
-    """
+    """A malformed ``html_baseurl`` (no scheme) degrades to "no links", not a build failure."""
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(
@@ -579,10 +570,7 @@ def test_html_baseurl_missing_scheme_disables_links_without_failing_build(tmp_pa
 
 
 def test_base_url_missing_trailing_slash_still_resolves_subpath(tmp_path: Path):
-    """An ``html_baseurl`` with a subpath but no trailing slash should be normalized.
-
-    Rather than silently dropping the last path segment.
-    """
+    """An ``html_baseurl`` with a subpath but no trailing slash still resolves correctly."""
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(

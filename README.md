@@ -46,33 +46,26 @@ sphinx_examples_as_code_conf = {
   (default) or `'bottom'`.
 - `formats`: which downloads to generate. A list containing `'py'`, `'ipynb'`, or both
   (default). Always offered in that order regardless of how the list is written.
-- `link_labels`: the text of the download link(s) themselves, per format -- for
-  translating them or matching a project's own copy style. Set only the format(s) you
-  want to change; any left unset keep reading their own default shown above.
+- `link_labels`: the text of the download link(s) themselves, per format. Set only the
+  format(s) you want to change; any left unset keep reading their own default shown above.
 - `gallery_downloads`: opt-in takeover of
   [sphinx-gallery](https://sphinx-gallery.github.io)'s own per-example downloads.
   `False` (default) leaves sphinx-gallery pages untouched. See
   [Sphinx-Gallery integration](#sphinx-gallery-integration) below.
 - `footer`: a string appended to the end of every generated file. Defaults to a one-line
   "generated file" credit linking back to this project; set to `None` to omit it
-  entirely. Preceded by a blank line and a `-`-only divider line, marking it as trailing
-  boilerplate rather than more of the example's own commentary -- the divider also
-  renders as a real horizontal rule in `.ipynb`, where the footer always gets its own
-  dedicated cell, regardless of what content precedes it. Parsed as RST, the same as any
-  other prose this extension handles: a hyperlink written as `` `text <url>`_ `` becomes
-  a real clickable Markdown link in `.ipynb`, and renders inline as `text url` in `.py`.
-  Plain text with no markup at all becomes one comment line per line of text, and
-  blank-line-separated paragraphs stay separated -- a longer, multi-paragraph custom
-  footer is laid out the same way any other prose in this extension is.
+  entirely. Preceded by a blank line and a `-`-only divider line, which also renders as a
+  real horizontal rule in `.ipynb`; the footer always gets its own dedicated cell there.
+  Parsed as RST: a hyperlink written as `` `text <url>`_ `` becomes a real clickable
+  Markdown link in `.ipynb`, and renders inline as `text url` in `.py`. Plain text with no
+  markup at all becomes one comment line per line of text, and blank-line-separated
+  paragraphs stay separated.
 
-An unrecognized key (a typo, or a leftover from an older release) raises a configuration
-error at build start rather than silently doing nothing.
+An unrecognized key raises a configuration error at build start.
 
 Cross-references and hyperlinks resolve into absolute links using Sphinx's own
-[`html_baseurl`](https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-html_baseurl)
--- the same setting used for canonical links and sitemap generation -- rather than a
-separate config key of this extension's own. Leave it unset and no links are generated
-anywhere, same as always.
+[`html_baseurl`](https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-html_baseurl).
+Leave it unset and no links are generated anywhere.
 
 Overriding a single key from the command line works via a dotted `-D` flag, e.g.
 `-D sphinx_examples_as_code_conf.link_position=bottom` -- this only touches that one
@@ -85,9 +78,7 @@ What happens to the content of an Examples section:
 - Doctest blocks (`>>> ...` / `... ...`) keep their input lines, prompts stripped, as
   real Python source. Doctest *output* lines are dropped — only the input code matters.
 - `.. code-block:: python` (or `py`) blocks are kept as-is; other languages become
-  comments, set off with blank lines on both sides like any other directive -- so a
-  preformatted block (e.g. an RST `::`-block illustrating a data format) still reads as
-  a distinct block rather than melting into the surrounding prose.
+  comments, set off with blank lines on both sides like any other directive.
 - Admonitions (`.. note::`, `.. warning::`, `.. seealso::`, ...) become a `# LABEL:`
   comment followed by their content as comments. "See Also" is recognized in any of its
   three forms (`.. seealso::`, a bare `.. rubric:: See Also`, or a hand-written `See
@@ -103,15 +94,13 @@ What happens to the content of an Examples section:
 - Everything else text-bearing (prose, captions, other non-Python code) becomes a plain
   `#` comment.
 - Figures/images, raw HTML, sphinx-design dropdowns/tab-sets, and sphinx-tags' `.. tags::`
-  line are dropped entirely -- none of them are documentation content a downloaded,
-  standalone file has any use for.
+  line are dropped entirely.
 
 Generated `.py` files start with a `# Examples from <qualified name>` title header
-(gallery mode uses the page's own title instead -- see below) and follow a few
-whitespace conventions so the result reads like normal Python: prose
-directly above a code block stays attached to it, a code block is always followed by a
-blank line, and a directive (header, `# NOTE:`-style block) gets blank lines on both
-sides.
+(gallery mode uses the page's own title instead -- see below), with a few whitespace
+conventions: prose directly above a code block stays attached to it, a code block is
+always followed by a blank line, and a directive (header, `# NOTE:`-style block) gets
+blank lines on both sides.
 
 Generated `.ipynb` notebooks use the same content, split into alternating code/markdown
 cells instead.
@@ -128,35 +117,26 @@ full example code" note and the `.py`/`.ipynb`/`.zip` download footer are remove
 the page, replaced with download link(s) built by this extension instead — same
 conversion rules as above, applied to the whole page rather than one Examples section.
 The generated file's header uses the page's own title (e.g. `# Create Circular Arcs`)
-rather than the generic `# Examples from <docname>` — gallery mode converts the whole
-page, not an Examples section carved out of a larger docstring, so there's no "from"
-framing to make.
+rather than the generic `# Examples from <docname>`.
 
 The "Total running time" line and the "Gallery generated by Sphinx-Gallery" credit line
 stay on the rendered page untouched, but never make it into the generated download
-itself: a "Total running time" sitting inside a file you just downloaded and ran
-yourself would read like it's timing *your* run, not the build's, and a "Generated by
-Sphinx-Gallery" credit is simply wrong inside a file this extension generated.
+itself.
 
 Detection is automatic and per-page — any page without a sphinx-gallery download footer
-is left completely untouched, so turning this on is safe even on a site that mixes
-gallery pages with ordinary docstring/prose pages using the Examples-section behavior
-above.
+is left completely untouched. Gallery pages and ordinary docstring/prose pages (using
+the Examples-section behavior above) can coexist on the same site.
 
 A `# %%` cell with its own RST heading gets the same title-plus-underline treatment as
-the file's own header, rather than melting into whatever prose follows it -- and for
-that reason renders as a real Markdown heading in `.ipynb`, not just plain text.
+the file's own header, and renders as a real Markdown heading in `.ipynb`.
 
 Two things worth knowing before turning this on:
 
-- It's built against sphinx-gallery's own long-standing RST/HTML output (the same
-  `sphx-glr-*` CSS classes its own theming depends on), not a documented extension API.
-  It's unlikely to change, but a future sphinx-gallery release could still shift that
-  structure without warning.
-- sphinx-gallery registers its own `.py`/`.ipynb`/`.zip` downloads for copying into
-  `_downloads/` before this extension gets a chance to remove the links pointing to
-  them, so those files still end up in the build output even though nothing on the page
-  links to them anymore.
+- It's built against sphinx-gallery's own RST/HTML output (the same `sphx-glr-*` CSS
+  classes its own theming depends on), not a documented extension API. A future
+  sphinx-gallery release could shift that structure without warning.
+- sphinx-gallery's own `.py`/`.ipynb`/`.zip` downloads still end up copied into
+  `_downloads/`, even though nothing on the page links to them anymore.
 
 ## Development
 

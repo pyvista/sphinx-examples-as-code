@@ -172,14 +172,8 @@ class _RenderContext:
 def _normalized_html_baseurl(app: Sphinx) -> str | None:
     """Sphinx's own ``html_baseurl`` config, normalized for use with ``urljoin``.
 
-    ``None`` if unset or not a usable absolute URL. Doesn't validate
-    ``html_baseurl`` itself and raise on a bad value the way this
-    extension's own config keys do -- it's Sphinx's own setting (also used
-    for canonical links and sitemap generation), not one this extension
-    owns -- it only makes sure a genuinely unusable value degrades to no
-    links generated, rather than broken ones: ``urljoin`` silently drops
-    the last path segment of a base URL with no trailing slash, so one is
-    added if missing.
+    ``None`` if unset or not a usable absolute URL. Adds a missing trailing
+    slash.
     """
     base_url = app.config.html_baseurl
     if not base_url:
@@ -1040,9 +1034,7 @@ def _merged_link_labels(value: object) -> dict[str, str]:
     """Merge a user-provided ``link_labels`` override over the defaults.
 
     A partial override (e.g. just ``{'py': 'Get the script'}``) only changes
-    that one format's label -- the rest keep reading the default, the same
-    "set only what you want to change" convention the top-level
-    ``sphinx_examples_as_code_conf`` dict itself follows.
+    that one format's label; any not given keep their default.
     """
     if not isinstance(value, dict):
         msg = f"sphinx_examples_as_code_conf['link_labels'] must be a dict, got {value!r}."

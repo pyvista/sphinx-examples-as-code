@@ -1784,13 +1784,10 @@ def test_normalized_html_baseurl_unset_is_none():
 
 
 def test_normalized_html_baseurl_empty_string_is_none():
-    # Sphinx's own default for html_baseurl -- the common "not configured" case
     assert seac._normalized_html_baseurl(_app_with_baseurl('')) is None
 
 
 def test_normalized_html_baseurl_missing_scheme_is_none():
-    # degrades to "no links", not a build failure -- html_baseurl isn't a
-    # config key this extension owns or validates (see _normalized_html_baseurl)
     assert seac._normalized_html_baseurl(_app_with_baseurl('docs.example.com/')) is None
 
 
@@ -1915,8 +1912,7 @@ def test_finalize_conf_coerces_cli_override_style_strings():
     assert conf['gallery_downloads'] is True
 
 
-def test_finalize_conf_base_url_is_no_longer_a_recognized_key():
-    # dropped in favor of Sphinx's own html_baseurl (see _normalized_html_baseurl)
+def test_finalize_conf_base_url_is_an_unknown_key():
     config = Mock(sphinx_examples_as_code_conf={'base_url': 'https://docs.example.com'})
     with pytest.raises(ConfigError, match=r'unknown key\(s\).*base_url'):
         seac._finalize_conf(Mock(), config)
@@ -1958,7 +1954,6 @@ def test_finalize_conf_does_not_mutate_the_defaults():
 
 
 def test_finalize_conf_link_labels_override_does_not_mutate_the_defaults():
-    # same regression guard, for the nested link_labels merge specifically
     original = dict(seac._DEFAULT_LINK_LABELS)
     config = Mock(sphinx_examples_as_code_conf={'link_labels': {'py': 'Get the script'}})
     seac._finalize_conf(Mock(), config)
