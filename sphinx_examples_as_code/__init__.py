@@ -169,6 +169,27 @@ class _RenderContext:
     in_footer: bool = False
 
 
+def _normalized_html_baseurl(app: Sphinx) -> str | None:
+    """Sphinx's own ``html_baseurl`` config, normalized for use with ``urljoin``.
+
+    ``None`` if unset or not a usable absolute URL. Doesn't validate
+    ``html_baseurl`` itself and raise on a bad value the way this
+    extension's own config keys do -- it's Sphinx's own setting (also used
+    for canonical links and sitemap generation), not one this extension
+    owns -- it only makes sure a genuinely unusable value degrades to no
+    links generated, rather than broken ones: ``urljoin`` silently drops
+    the last path segment of a base URL with no trailing slash, so one is
+    added if missing.
+    """
+    base_url = app.config.html_baseurl
+    if not base_url:
+        return None
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        return None
+    return base_url if base_url.endswith('/') else base_url + '/'
+
+
 def _resolve_link_url(node: nodes.reference, ctx: _RenderContext) -> str | None:
     """Resolve a reference node's target to an absolute URL, if possible.
 
@@ -181,7 +202,7 @@ def _resolve_link_url(node: nodes.reference, ctx: _RenderContext) -> str | None:
     if refuri and urlsplit(refuri).netloc:
         return refuri  # already absolute (an external hyperlink)
 
-    base_url = ctx.app.config.sphinx_examples_as_code_conf['base_url']
+    base_url = _normalized_html_baseurl(ctx.app)
     if not base_url:
         return None
     current_page_url = urljoin(base_url, ctx.app.builder.get_target_uri(ctx.docname))
@@ -964,31 +985,9 @@ _DEFAULT_FOOTER = (
 _CONF_DEFAULTS: dict[str, object] = {
     'link_position': 'top',
     'formats': ['py', 'ipynb'],
-    'base_url': None,
     'gallery_downloads': False,
     'footer': _DEFAULT_FOOTER,
 }
-
-
-def _normalize_base_url(base_url: str | None) -> str | None:
-    """Validate and normalize a ``base_url`` value.
-
-    Catches two common typos loudly instead of silently generating wrong
-    links: a missing scheme (parses with no netloc at all), and a subpath
-    with no trailing slash (``urljoin`` would drop the last segment).
-    """
-    if not base_url:
-        return None
-
-    parsed = urlsplit(base_url)
-    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
-        msg = (
-            f"sphinx_examples_as_code_conf['base_url']={base_url!r} does not look "
-            "like a valid absolute URL (expected something like 'https://docs.example.com/')."
-        )
-        raise ConfigError(msg)
-
-    return base_url if base_url.endswith('/') else base_url + '/'
 
 
 def _coerce_conf_value(key: str, value: object) -> object:
@@ -1014,7 +1013,7 @@ def _coerce_conf_value(key: str, value: object) -> object:
             f"sphinx_examples_as_code_conf['gallery_downloads'] must be '0' or '1', got {value!r}."
         )
         raise ConfigError(msg)
-    return value  # link_position, base_url, footer: a string is already the real type
+    return value  # link_position, footer: a string is already the real type
 
 
 def _finalize_conf(_app: Sphinx, config: Config) -> None:
@@ -1034,7 +1033,6 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
 
     merged = dict(_CONF_DEFAULTS)
     merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
-    merged['base_url'] = _normalize_base_url(merged['base_url'])
     config.sphinx_examples_as_code_conf = merged
 
 

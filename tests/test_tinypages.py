@@ -452,14 +452,14 @@ def test_formats_config_selection(
 
 
 # ---------------------------------------------------------------------------
-# sphinx_examples_as_code_conf['base_url'] and See Also link resolution
+# html_baseurl and See Also link resolution
 # ---------------------------------------------------------------------------
 
 
 def test_base_url_unset_no_links_anywhere(
     built: tuple[Path, list[Path]], built_notebooks: list[Path]
 ):
-    """Default (``base_url=None``): no links anywhere, in either format -- the status quo."""
+    """Default (``html_baseurl`` unset): no links anywhere, in either format -- the status quo."""
     for name in (
         'case_regular_xref_for_base_url',
         'case_see_also_directive_for_base_url',
@@ -476,9 +476,11 @@ def test_base_url_unset_no_links_anywhere(
 
 
 def test_base_url_set_resolves_links(tmp_path: Path):
-    # With a base URL configured, See Also parts (in any form) get literal URL
-    # text in .py and clickable markdown links in .ipynb; regular refs only get
-    # the link in .ipynb, and .py stays link-free outside a See Also part.
+    # With html_baseurl configured (the standard Sphinx setting, also used
+    # for canonical links/sitemap generation -- not a setting of this
+    # extension's own), See Also parts (in any form) get literal URL text in
+    # .py and clickable markdown links in .ipynb; regular refs only get the
+    # link in .ipynb, and .py stays link-free outside a See Also part.
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(
@@ -488,7 +490,7 @@ def test_base_url_set_resolves_links(tmp_path: Path):
             doctree_dir,
             (
                 '-D',
-                'sphinx_examples_as_code_conf.base_url=https://docs.example.com/',
+                'html_baseurl=https://docs.example.com/',
                 # disabled -- this test's "no http anywhere" checks would
                 # otherwise trip on the (unrelated) default footer's URL
                 '-D',
@@ -540,27 +542,44 @@ def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
     assert header_cell['source'][0].endswith('  \n')
 
 
-def test_base_url_missing_scheme_fails_build(tmp_path: Path):
-    """A base URL typo (no scheme) should fail the build immediately.
+def test_html_baseurl_missing_scheme_disables_links_without_failing_build(tmp_path: Path):
+    """A malformed ``html_baseurl`` (no scheme) degrades to "no links", not a build failure.
 
-    Rather than silently generating broken links throughout it.
+    Unlike this extension's own config keys, ``html_baseurl`` isn't
+    something it owns or validates -- it's a standard Sphinx setting also
+    used for canonical links/sitemap generation, which Sphinx itself
+    doesn't validate the format of either. Failing the build over it would
+    be presumptuous of a value that might be set (however unusually) for
+    reasons of its own.
     """
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
-    returncode, _out, err = _run_sphinx_build(
+    returncode, out, err = _run_sphinx_build(
         _sphinx_build_cmd(
             SRCDIR,
             html_dir,
             doctree_dir,
-            ('-D', 'sphinx_examples_as_code_conf.base_url=docs.example.com/'),
+            (
+                '-D',
+                'html_baseurl=docs.example.com/',
+                # disabled -- its own (unrelated) link would trip the "no
+                # markdown links" check below
+                '-D',
+                'sphinx_examples_as_code_conf.footer=',
+            ),
         ),
     )
-    assert returncode != 0
-    assert 'does not look like a valid absolute URL' in err
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+
+    nb_path = next(
+        (html_dir / '_downloads').rglob('docstring_cases_case_regular_xref_for_base_url.ipynb')
+    )
+    nb_text = nb_path.read_text(encoding='utf-8')
+    assert '](' not in nb_text  # no markdown links -- same as html_baseurl unset entirely
 
 
 def test_base_url_missing_trailing_slash_still_resolves_subpath(tmp_path: Path):
-    """A base URL with a subpath but no trailing slash should be normalized.
+    """An ``html_baseurl`` with a subpath but no trailing slash should be normalized.
 
     Rather than silently dropping the last path segment.
     """
@@ -571,7 +590,7 @@ def test_base_url_missing_trailing_slash_still_resolves_subpath(tmp_path: Path):
             SRCDIR,
             html_dir,
             doctree_dir,
-            ('-D', 'sphinx_examples_as_code_conf.base_url=https://docs.example.com/en/stable'),
+            ('-D', 'html_baseurl=https://docs.example.com/en/stable'),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
