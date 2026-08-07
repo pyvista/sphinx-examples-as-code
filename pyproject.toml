@@ -105,6 +105,7 @@ force-sort-within-sections = true
 required-imports = ['from __future__ import annotations']
 
 [tool.setuptools]
+license-files = ['LICENSE']
 packages = ['sphinx_examples_as_code']
 
 [tool.setuptools_scm]
