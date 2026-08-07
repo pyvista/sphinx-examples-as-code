@@ -249,6 +249,15 @@ def test_header_format(built: tuple[Path, list[Path]]):
     assert lines[2] == ''
 
 
+def test_header_format_ipynb_uses_atx(built_notebooks: list[Path]):
+    """The same header, in .ipynb, is a single ATX level-1 line -- no underline."""
+    nb_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_note')
+    notebook = json.loads(nb_path.read_text(encoding='utf-8'))
+    header_cell = notebook['cells'][0]
+    lines = [line.rstrip() for line in header_cell['source']]
+    assert lines[0] == '# Examples from docstring_cases.case_note'
+
+
 def test_whitespace_conventions(built: tuple[Path, list[Path]]):
     """Check the spacing rules.
 
@@ -533,12 +542,19 @@ def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
     """Adjacent lines within one markdown cell need an explicit hard break.
 
     Without it, markdown treats a single newline as whitespace and runs
-    everything in the cell together into one paragraph.
+    everything in the cell together into one paragraph. Checked on the
+    note's own "# NOTE:" label line, immediately followed by its content
+    with no blank line between -- not the header cell, which is a single
+    ATX heading line with nothing else to connect to.
     """
     nb_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_note')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
-    header_cell = next(c for c in notebook['cells'] if c['cell_type'] == 'markdown')
-    assert header_cell['source'][0].endswith('  \n')
+    note_cell = next(
+        c
+        for c in notebook['cells']
+        if c['cell_type'] == 'markdown' and 'useful information' in ''.join(c['source'])
+    )
+    assert note_cell['source'][0].endswith('  \n')
 
 
 def test_html_baseurl_missing_scheme_disables_links_without_failing_build(tmp_path: Path):

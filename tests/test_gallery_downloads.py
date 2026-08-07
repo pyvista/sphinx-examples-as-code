@@ -68,26 +68,29 @@ def _is_ours(path: Path) -> bool:
     """Distinguish our generated file from sphinx-gallery's own same-named one.
 
     Both write a ``plot_minimal.py``/``.ipynb`` under ``_downloads/<digest>/``
-    -- ours is identifiable structurally, by the title+underline header this
-    extension always starts a generated file with (its first two lines in
-    ``.py``, or its first markdown cell's first two lines in ``.ipynb``): a
-    title line followed by a line of ``=`` matching that title's length.
+    -- ours is identifiable structurally, by the level-1 header this
+    extension always starts a generated file with: a title line followed by
+    a line of ``=`` matching that title's length in ``.py``, or a single
+    ``# Title`` (ATX level 1) line as the first markdown cell's first line
+    in ``.ipynb`` (see ``_title_underline_segment``).
     """
     if path.suffix == '.py':
         lines = path.read_text(encoding='utf-8').splitlines()
-    else:
-        cells = json.loads(path.read_text(encoding='utf-8'))['cells']
-        # markdown lines carry a trailing hard-break "  " -- strip it before comparing
-        lines = (
-            [line.rstrip() for line in ''.join(cells[0]['source']).splitlines()] if cells else []
-        )
+        if len(lines) < 2:
+            return False
+        title, underline = lines[0].removeprefix('# '), lines[1].removeprefix('# ')
+        return bool(title) and underline == '=' * len(title)
 
-    if len(lines) < 2:
+    cells = json.loads(path.read_text(encoding='utf-8'))['cells']
+    if not cells or not cells[0]['source']:
         return False
-    title, underline = lines[0], lines[1]
-    if path.suffix == '.py':
-        title, underline = title.removeprefix('# '), underline.removeprefix('# ')
-    return bool(title) and underline == '=' * len(title)
+    # sphinx-gallery's own native notebook also titles its first cell
+    # "# <title>" (plain ATX, no hard break) -- ours is only distinguishable
+    # by the trailing two-space hard break _cell_source always adds
+    raw_first_line = cells[0]['source'][0]
+    first_line = raw_first_line.rstrip()
+    has_hard_break = raw_first_line.rstrip('\n').endswith('  ')
+    return has_hard_break and first_line.startswith('# ') and not first_line.startswith('# #')
 
 
 def test_gallery_downloads_disabled_by_default(tmp_path: Path):
@@ -221,7 +224,7 @@ def test_gallery_downloads_footer_is_its_own_dedicated_ipynb_cell(gallery_build:
 def test_gallery_downloads_sibling_section_heading_is_markdown_in_ipynb(
     gallery_build: tuple[Path, str],
 ):
-    """The sibling section's heading is a level-2 (``-`` underline) Markdown heading."""
+    """The sibling section's heading is a level-2 (``##``) Markdown heading."""
     html_dir, _html = gallery_build
     notebook = json.loads(_generated(html_dir, '.ipynb').read_text(encoding='utf-8'))
     heading_cell = next(
@@ -229,20 +232,20 @@ def test_gallery_downloads_sibling_section_heading_is_markdown_in_ipynb(
         for c in notebook['cells']
         if c['cell_type'] == 'markdown' and 'A headed cell' in ''.join(c['source'])
     )
-    source = ''.join(heading_cell['source'])
-    assert '-' * len('A headed cell') in source  # setext underline
+    lines = [line.rstrip() for line in heading_cell['source']]
+    assert '## A headed cell' in lines
 
 
 def test_gallery_downloads_page_title_is_level_1_sibling_heading_is_level_2(
     gallery_build: tuple[Path, str],
 ):
-    """The page's own title (``=``) outranks a sibling section's heading (``-``)."""
+    """The page's own title (``#``) outranks a sibling section's heading (``##``)."""
     html_dir, _html = gallery_build
     notebook = json.loads(_generated(html_dir, '.ipynb').read_text(encoding='utf-8'))
     title_cell = notebook['cells'][0]
-    title_source = ''.join(title_cell['source'])
-    assert '=' * len('A minimal gallery example') in title_source
-    assert '-' * len('A minimal gallery example') not in title_source
+    lines = [line.rstrip() for line in title_cell['source']]
+    assert '# A minimal gallery example' in lines
+    assert '## A minimal gallery example' not in lines
 
 
 def test_gallery_downloads_generated_py_executes(gallery_build: tuple[Path, str]):

@@ -58,8 +58,16 @@ def test_reused_underline_char_renders_as_level_1(built: Path):
     assert lines[reused_idx + 1] == '# ' + '=' * len('Reused Top Level')
 
 
-def test_three_genuine_levels_uses_atx_for_the_third(built: Path):
-    """A subsection nested two sections deep gets ATX ``###``, not another dash line.
+def test_reused_underline_char_renders_as_level_1_in_ipynb(built: Path):
+    nb_path = _generated(built, 'plot_reused_level.ipynb')
+    notebook = json.loads(nb_path.read_text(encoding='utf-8'))
+    all_lines = [line.rstrip() for cell in notebook['cells'] for line in cell['source']]
+    assert '## Nested Subsection' in all_lines
+    assert '# Reused Top Level' in all_lines
+
+
+def test_three_genuine_levels_py_uses_tilde_for_the_third(built: Path):
+    """A subsection nested two sections deep gets a ``~`` underline, not another dash line.
 
     Otherwise it would render identically to its own parent section's
     heading -- indistinguishable from a sibling instead of a subsection.
@@ -70,11 +78,12 @@ def test_three_genuine_levels_uses_atx_for_the_third(built: Path):
     section_idx = lines.index('# Section')
     assert lines[section_idx + 1] == '# ' + '-' * len('Section')
 
-    assert '# ### Subsection' in lines
-    assert '# Subsection' not in lines  # not a level-2 dash heading
+    subsection_idx = lines.index('# Subsection')
+    assert lines[subsection_idx + 1] == '# ' + '~' * len('Subsection')
 
 
 def test_three_genuine_levels_atx_renders_as_h3_in_ipynb(built: Path):
+    """In .ipynb, every level uses ATX -- the third level is a plain ``###`` line."""
     nb_path = _generated(built, 'plot_three_levels.ipynb')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     all_source = ''.join(''.join(cell['source']) for cell in notebook['cells'])
