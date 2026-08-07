@@ -368,23 +368,29 @@ def _convert_literal_block(node: nodes.literal_block) -> list[Segment]:
     return [('directive', comment_lines)]
 
 
-#: Setext underline character per heading level -- ``=`` for the file's own
-#: top-level header (level 1), ``-`` for a subheading (level 2). CommonMark's
-#: setext syntax only supports these two levels.
+#: Setext underline character for the two levels it supports -- ``=`` for
+#: the file's own top-level header (level 1), ``-`` for a subheading
+#: (level 2). Anything deeper uses ATX ``#`` syntax instead (see
+#: ``_title_underline_segment``).
 _TITLE_UNDERLINE_CHARS = {1: '=', 2: '-'}
 
 
 def _title_underline_segment(title: str, level: int = 1) -> Segment:
-    """Build a title + underline directive segment, e.g. ``# Title`` + ``# =====``.
+    """Build a heading directive segment for ``title`` at the given level.
 
-    Shared by the file's own header (see ``_header_segment``), which is
-    always level 1, and gallery mode's sibling-section headings, which are
-    level 2. The underline is what makes this render as a real Markdown
-    heading in ``.ipynb`` (setext-style, once the ``#`` comment prefix is
-    stripped for markdown cells) rather than plain text.
+    Levels 1 and 2 use a setext-style title + underline (e.g. ``# Title`` +
+    ``# =====``), matching the file's own header (see ``_header_segment``)
+    and gallery mode's sibling-section headings respectively. Level 3+ uses
+    ATX ``#`` syntax instead (e.g. ``# ### Title``), since CommonMark's
+    setext syntax only supports the first two levels. Either way, this is
+    what makes the heading render as real Markdown in ``.ipynb`` (once the
+    ``#`` comment prefix is stripped for markdown cells) rather than plain
+    text.
     """
-    underline = _TITLE_UNDERLINE_CHARS[level] * len(title)
-    return ('directive', [f'# {title}', f'# {underline}'])
+    if level <= 2:
+        underline = _TITLE_UNDERLINE_CHARS[level] * len(title)
+        return ('directive', [f'# {title}', f'# {underline}'])
+    return ('directive', [f'# {"#" * level} {title}'])
 
 
 def _heading_level(title: nodes.title) -> int:
@@ -392,16 +398,16 @@ def _heading_level(title: nodes.title) -> int:
 
     Counts the title's own section and each ancestor ``nodes.section``.
     Running this on the file's own header would give level 1; a title
-    nested inside that comes out level 2, and so does anything nested
-    deeper (clamped -- the deepest level CommonMark's setext syntax can
-    represent).
+    nested inside that comes out level 2, one nested inside that comes out
+    level 3, and so on -- clamped to 6, the deepest level CommonMark's ATX
+    heading syntax can represent.
     """
     level = 0
     node: nodes.Node | None = title.parent
     while isinstance(node, nodes.section):
         level += 1
         node = node.parent
-    return min(level, 2)
+    return min(level, 6)
 
 
 def _convert_admonition(

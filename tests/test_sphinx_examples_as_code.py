@@ -771,6 +771,18 @@ def test_title_underline_segment_level_2_uses_dashes():
     assert lines == ['# A Title', '# -------']
 
 
+def test_title_underline_segment_level_3_uses_atx():
+    kind, lines = seac._title_underline_segment('A Title', level=3)
+    assert kind == 'directive'
+    assert lines == ['# ### A Title']
+
+
+def test_title_underline_segment_level_6_uses_atx():
+    kind, lines = seac._title_underline_segment('A Title', level=6)
+    assert kind == 'directive'
+    assert lines == ['# ###### A Title']
+
+
 # ---------------------------------------------------------------------------
 # _heading_level
 # ---------------------------------------------------------------------------
@@ -785,7 +797,7 @@ def test_heading_level_one_section_deep_is_level_2():
     assert seac._heading_level(title) == 2
 
 
-def test_heading_level_two_sections_deep_is_clamped_to_2():
+def test_heading_level_two_sections_deep_is_3():
     page_section = nodes.section()
     section = nodes.section()
     subsection = nodes.section()
@@ -793,7 +805,18 @@ def test_heading_level_two_sections_deep_is_clamped_to_2():
     subsection += title
     section += subsection
     page_section += section
-    assert seac._heading_level(title) == 2
+    assert seac._heading_level(title) == 3
+
+
+def test_heading_level_clamped_to_6():
+    current = nodes.section()
+    for _ in range(8):
+        nested = nodes.section()
+        current += nested
+        current = nested
+    title = nodes.title('', 'Very deeply nested')
+    current += title
+    assert seac._heading_level(title) == 6
 
 
 def test_heading_level_not_nested_under_anything_is_level_1():
@@ -838,6 +861,19 @@ def test_convert_node_title_not_nested_uses_level_1():
     assert seac._convert_node(title, _ctx()) == [
         ('directive', ['# A subsection', '# ============'])
     ]
+
+
+def test_convert_node_title_two_sections_deep_uses_atx():
+    # e.g. a "# %%" cell's own heading nested inside another sibling
+    # section's heading, rather than directly under the page's own title
+    page_section = nodes.section()
+    section = nodes.section()
+    subsection = nodes.section()
+    title = nodes.title('', 'A sub-subsection')
+    subsection += title
+    section += subsection
+    page_section += section
+    assert seac._convert_node(title, _ctx()) == [('directive', ['# ### A sub-subsection'])]
 
 
 def test_convert_node_empty_title_returns_empty():

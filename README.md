@@ -128,11 +128,13 @@ is left completely untouched. Gallery pages and ordinary docstring/prose pages (
 the Examples-section behavior above) can coexist on the same site.
 
 A `# %%` cell with its own RST heading gets the same title-plus-underline treatment as
-the file's own header, and renders as a real Markdown heading in `.ipynb` (`<h1>` for the
-file's own header, `# Title` + `# ====`; `<h2>` for a cell heading, `# Title` + `# ----`).
-A cell heading nested under the page's own title (the common case) is level 2; one that
-reuses the page title's own underline character -- a real RST heading, one level up --
-is level 1, matching the file's own header.
+the file's own header, and renders as a real Markdown heading in `.ipynb`. Level is
+relative to actual RST section nesting, not always one below the file's own header:
+level 1 (`<h1>`, `# Title` + `# ====`) for the file's own header, or a cell heading that
+reuses the page title's own underline character; level 2 (`<h2>`, `# Title` + `# ----`)
+for a cell heading nested under it (the common case), or one level below whatever
+heading precedes it. Level 3 and deeper use ATX syntax instead (`# ### Title`), since
+Markdown's underline-style headings only support two levels.
 
 Two things worth knowing before turning this on:
 
