@@ -368,29 +368,31 @@ def _convert_literal_block(node: nodes.literal_block) -> list[Segment]:
     return [('directive', comment_lines)]
 
 
-#: Setext underline character for the two levels it supports -- ``=`` for
-#: the file's own top-level header (level 1), ``-`` for a subheading
-#: (level 2). Anything deeper uses ATX ``#`` syntax instead (see
-#: ``_title_underline_segment``).
-_TITLE_UNDERLINE_CHARS = {1: '=', 2: '-'}
+#: RST underline character per heading level, for ``.py`` output -- the
+#: same sequence Sphinx's own documentation uses for sections, subsections,
+#: subsubsections, paragraphs, and sub-paragraphs.
+_TITLE_UNDERLINE_CHARS = {1: '=', 2: '-', 3: '~', 4: '^', 5: '"', 6: "'"}
+
+#: Deepest heading level either heading style below can represent.
+_MAX_HEADING_LEVEL = 6
 
 
-def _title_underline_segment(title: str, level: int = 1) -> Segment:
+def _title_underline_segment(title: str, level: int, fmt: str) -> Segment:
     """Build a heading directive segment for ``title`` at the given level.
 
-    Levels 1 and 2 use a setext-style title + underline (e.g. ``# Title`` +
-    ``# =====``), matching the file's own header (see ``_header_segment``)
-    and gallery mode's sibling-section headings respectively. Level 3+ uses
-    ATX ``#`` syntax instead (e.g. ``# ### Title``), since CommonMark's
-    setext syntax only supports the first two levels. Either way, this is
-    what makes the heading render as real Markdown in ``.ipynb`` (once the
-    ``#`` comment prefix is stripped for markdown cells) rather than plain
-    text.
+    Consistent within each format rather than mixed: ``.py`` always uses an
+    RST-style title + underline (e.g. ``# Title`` + ``# =====``), one
+    character per level (see ``_TITLE_UNDERLINE_CHARS``); ``.ipynb`` always
+    uses ATX ``#`` syntax instead (e.g. ``# ### Title``), since that's a
+    real Markdown heading at any level once the ``#`` comment prefix is
+    stripped for markdown cells, whereas an RST-style underline only reads
+    as a heading there for the first two levels.
     """
-    if level <= 2:
-        underline = _TITLE_UNDERLINE_CHARS[level] * len(title)
-        return ('directive', [f'# {title}', f'# {underline}'])
-    return ('directive', [f'# {"#" * level} {title}'])
+    level = min(level, _MAX_HEADING_LEVEL)
+    if fmt == 'ipynb':
+        return ('directive', [f'# {"#" * level} {title}'])
+    underline = _TITLE_UNDERLINE_CHARS[level] * len(title)
+    return ('directive', [f'# {title}', f'# {underline}'])
 
 
 def _heading_level(title: nodes.title) -> int:
@@ -399,15 +401,14 @@ def _heading_level(title: nodes.title) -> int:
     Counts the title's own section and each ancestor ``nodes.section``.
     Running this on the file's own header would give level 1; a title
     nested inside that comes out level 2, one nested inside that comes out
-    level 3, and so on -- clamped to 6, the deepest level CommonMark's ATX
-    heading syntax can represent.
+    level 3, and so on -- clamped to ``_MAX_HEADING_LEVEL``.
     """
     level = 0
     node: nodes.Node | None = title.parent
     while isinstance(node, nodes.section):
         level += 1
         node = node.parent
-    return min(level, 6)
+    return min(level, _MAX_HEADING_LEVEL)
 
 
 def _convert_admonition(
@@ -453,7 +454,7 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
         # _heading_level).
         title_text = _render_inline(node, ctx).strip()
         level = _heading_level(node)
-        return [_title_underline_segment(title_text, level=level)] if title_text else []
+        return [_title_underline_segment(title_text, level, ctx.fmt)] if title_text else []
     if isinstance(node, (*_CONTAINER_TYPES, nodes.section)):
         # nodes.section (gallery mode only): a sphinx-gallery ``# %%`` cell
         # with its own RST heading becomes a *sibling* section at the
@@ -577,9 +578,9 @@ def _qualified_name_for(node: nodes.Node, docname: str, counter: int) -> str:
     return f'{base}-example-{counter}'
 
 
-def _header_segment(qualified_name: str) -> Segment:
-    """Build the title-header segment, e.g. ``# pyvista.read examples`` + underline."""
-    return _title_underline_segment(f'Examples from {qualified_name}')
+def _header_title(qualified_name: str) -> str:
+    """Build the file's own header title text, e.g. ``Examples from pyvista.read``."""
+    return f'Examples from {qualified_name}'
 
 
 # A plain divider, not tied to any specific text's length the way a title
@@ -596,8 +597,8 @@ def _footer_segment(footer: str | None, fmt: str, app: Sphinx, docname: str) -> 
     """Build the footer directive segment, if a footer is configured.
 
     Empty (0 or 1 elements, not a bare ``Segment | None``) so callers can
-    just splat it into a segment list like ``_header_segment``'s result.
-    Starts with ``_FOOTER_SEPARATOR`` -- see its comment for why.
+    just splat it into a segment list. Starts with ``_FOOTER_SEPARATOR``
+    -- see its comment for why.
 
     Parsed as RST -- the same way any other prose in this extension is --
     rather than treated as a special case: a hyperlink written as
@@ -791,7 +792,7 @@ def _build_download_entries(
     app: Sphinx,
     docname: str,
     name: str,
-    header: Segment,
+    header_title: str,
     nodes_in_span: list[nodes.Node],
     formats: list[str],
     footer: str | None,
@@ -803,8 +804,10 @@ def _build_download_entries(
     requested -- empty if the span has no real code, or ``formats`` itself
     is empty. Shared by the docstring-Examples path and gallery-page path;
     the only differences between them are how ``nodes_in_span``/``name``
-    get built, and what ``header`` says (see ``_header_segment`` vs.
-    ``_process_gallery_page``'s own title handling).
+    get built, and what ``header_title`` says (see ``_header_title`` vs.
+    ``_process_gallery_page``'s own title handling). Always level 1 -- the
+    file's own header is the one heading every generated file has exactly
+    one of (see ``_title_underline_segment``).
     """
     py_ctx = _RenderContext(app=app, docname=docname, fmt='py')
     py_segments = _build_segments(nodes_in_span, py_ctx)
@@ -812,7 +815,8 @@ def _build_download_entries(
     if not any(kind == 'code' for kind, _lines in py_segments):
         return []
 
-    py_segments_full = [header, *py_segments, *_footer_segment(footer, 'py', app, docname)]
+    py_header = _title_underline_segment(header_title, 1, 'py')
+    py_segments_full = [py_header, *py_segments, *_footer_segment(footer, 'py', app, docname)]
     source = '\n'.join(_join_segments(py_segments_full)).rstrip() + '\n\n'
 
     if not _has_real_code(source):
@@ -828,6 +832,7 @@ def _build_download_entries(
         else:
             ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
             ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
+            ipynb_header = _title_underline_segment(header_title, 1, 'ipynb')
             # Converted separately from the footer and concatenated, rather
             # than joined into one segment list and converted together:
             # _segments_to_cells only starts a new cell when the kind
@@ -835,7 +840,7 @@ def _build_download_entries(
             # following non-code content (e.g. a trailing admonition) would
             # otherwise share its cell instead of always getting one of its
             # own.
-            cells = _segments_to_cells([header, *ipynb_segments])
+            cells = _segments_to_cells([ipynb_header, *ipynb_segments])
             cells.extend(_segments_to_cells(_footer_segment(footer, 'ipynb', app, docname)))
             rel_path = _write_notebook(app, name, _build_notebook(cells))
         entries.append((label, rel_path))
@@ -864,7 +869,7 @@ def _process_span(
 
     name = _qualified_name_for(heading, docname, counter)
     entries = _build_download_entries(
-        app, docname, name, _header_segment(name), nodes_in_span, formats, footer, link_labels
+        app, docname, name, _header_title(name), nodes_in_span, formats, footer, link_labels
     )
     if not entries:
         return
@@ -984,9 +989,9 @@ def _process_gallery_page(
     # not an Examples section carved out of a larger docstring, so there's
     # no "from" framing to make. Falls back to the usual header on the off
     # chance the page has no title of its own.
-    header = _title_underline_segment(title) if title else _header_segment(name)
+    header_title = title if title else _header_title(name)
     entries = _build_download_entries(
-        app, docname, name, header, nodes_in_span, formats, footer, link_labels
+        app, docname, name, header_title, nodes_in_span, formats, footer, link_labels
     )
     if not entries:
         return

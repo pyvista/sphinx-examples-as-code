@@ -127,14 +127,21 @@ Detection is automatic and per-page — any page without a sphinx-gallery downlo
 is left completely untouched. Gallery pages and ordinary docstring/prose pages (using
 the Examples-section behavior above) can coexist on the same site.
 
-A `# %%` cell with its own RST heading gets the same title-plus-underline treatment as
-the file's own header, and renders as a real Markdown heading in `.ipynb`. Level is
-relative to actual RST section nesting, not always one below the file's own header:
-level 1 (`<h1>`, `# Title` + `# ====`) for the file's own header, or a cell heading that
-reuses the page title's own underline character; level 2 (`<h2>`, `# Title` + `# ----`)
-for a cell heading nested under it (the common case), or one level below whatever
-heading precedes it. Level 3 and deeper use ATX syntax instead (`# ### Title`), since
-Markdown's underline-style headings only support two levels.
+A `# %%` cell with its own RST heading gets the same header treatment as the file's own
+title, and renders as a real Markdown heading in `.ipynb`. Level is relative to actual
+RST section nesting, not always one below the file's own header: a cell heading nested
+under the page's own title (the common case) is one level below it; one that reuses the
+page title's own underline character is level 1, the same as the file's own header; a
+cell heading nested under *that* is level 2 relative to it, and so on.
+
+Each format uses one heading style consistently across every level, rather than mixing
+styles:
+
+- `.py` uses an RST-style title + underline, one character per level -- the same
+  sequence Sphinx's own documentation uses for sections through sub-paragraphs: `=`, `-`,
+  `~`, `^`, `"`, `'` for levels 1 through 6.
+- `.ipynb` always uses ATX syntax (`#`, `##`, `###`, ...), since that's a real Markdown
+  heading at any level, whereas an underline only reads as one for the first two.
 
 Two things worth knowing before turning this on:
 

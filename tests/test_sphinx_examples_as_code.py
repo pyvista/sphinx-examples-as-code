@@ -747,38 +747,43 @@ def test_qualified_name_for_examples_section_sibling_no_desc_falls_back():
 # ---------------------------------------------------------------------------
 
 
-def test_header_segment_format():
-    kind, lines = seac._header_segment('pyvista.read')
-    assert kind == 'directive'
-    assert lines[0] == '# Examples from pyvista.read'
-    assert lines[1] == '# ' + '=' * len('Examples from pyvista.read')
+def test_header_title_format():
+    assert seac._header_title('pyvista.read') == 'Examples from pyvista.read'
 
 
 # ---------------------------------------------------------------------------
 # _title_underline_segment
 # ---------------------------------------------------------------------------
 
+# The full level -> underline character convention, for .py -- same
+# sequence Sphinx's own documentation uses for sections through
+# sub-paragraphs.
+_LEVEL_UNDERLINE_CHARS = {1: '=', 2: '-', 3: '~', 4: '^', 5: '"', 6: "'"}
 
-def test_title_underline_segment_format():
-    kind, lines = seac._title_underline_segment('A Title')
+
+@pytest.mark.parametrize('level', [1, 2, 3, 4, 5, 6])
+def test_title_underline_segment_py_uses_level_specific_underline(level):
+    kind, lines = seac._title_underline_segment('A Title', level, 'py')
     assert kind == 'directive'
-    assert lines == ['# A Title', '# =======']
+    char = _LEVEL_UNDERLINE_CHARS[level]
+    assert lines == ['# A Title', '# ' + char * len('A Title')]
 
 
-def test_title_underline_segment_level_2_uses_dashes():
-    kind, lines = seac._title_underline_segment('A Title', level=2)
+@pytest.mark.parametrize('level', [1, 2, 3, 4, 5, 6])
+def test_title_underline_segment_ipynb_always_uses_atx(level):
+    kind, lines = seac._title_underline_segment('A Title', level, 'ipynb')
     assert kind == 'directive'
-    assert lines == ['# A Title', '# -------']
+    assert lines == [f'# {"#" * level} A Title']
 
 
-def test_title_underline_segment_level_3_uses_atx():
-    kind, lines = seac._title_underline_segment('A Title', level=3)
+def test_title_underline_segment_py_level_beyond_6_clamped():
+    kind, lines = seac._title_underline_segment('A Title', 9, 'py')
     assert kind == 'directive'
-    assert lines == ['# ### A Title']
+    assert lines == ['# A Title', "# '''''''"]
 
 
-def test_title_underline_segment_level_6_uses_atx():
-    kind, lines = seac._title_underline_segment('A Title', level=6)
+def test_title_underline_segment_ipynb_level_beyond_6_clamped():
+    kind, lines = seac._title_underline_segment('A Title', 9, 'ipynb')
     assert kind == 'directive'
     assert lines == ['# ###### A Title']
 
@@ -841,39 +846,70 @@ def test_heading_level_reused_top_level_char_then_nested_subsection():
     assert seac._heading_level(title) == 2
 
 
-def test_convert_node_title_uses_underline_treatment():
+def _nest_title_one_deep(text: str) -> nodes.title:
     # nested one section inside a page's own title section -- the common
     # case for a gallery sibling section's heading
     page_section = nodes.section()
     section = nodes.section()
-    title = nodes.title('', 'A subsection')
+    title = nodes.title('', text)
     section += title
     page_section += section
-    assert seac._convert_node(title, _ctx()) == [
+    return title
+
+
+def test_convert_node_title_uses_underline_treatment():
+    title = _nest_title_one_deep('A subsection')
+    assert seac._convert_node(title, _ctx(fmt='py')) == [
         ('directive', ['# A subsection', '# ------------'])
     ]
+
+
+def test_convert_node_title_one_deep_ipynb_uses_atx():
+    title = _nest_title_one_deep('A subsection')
+    assert seac._convert_node(title, _ctx(fmt='ipynb')) == [('directive', ['# ## A subsection'])]
 
 
 def test_convert_node_title_not_nested_uses_level_1():
     section = nodes.section()
     title = nodes.title('', 'A subsection')
     section += title
-    assert seac._convert_node(title, _ctx()) == [
+    assert seac._convert_node(title, _ctx(fmt='py')) == [
         ('directive', ['# A subsection', '# ============'])
     ]
 
 
-def test_convert_node_title_two_sections_deep_uses_atx():
+def test_convert_node_title_not_nested_ipynb_uses_atx():
+    section = nodes.section()
+    title = nodes.title('', 'A subsection')
+    section += title
+    assert seac._convert_node(title, _ctx(fmt='ipynb')) == [('directive', ['# # A subsection'])]
+
+
+def _nest_title_three_deep(text: str) -> nodes.title:
     # e.g. a "# %%" cell's own heading nested inside another sibling
     # section's heading, rather than directly under the page's own title
     page_section = nodes.section()
     section = nodes.section()
     subsection = nodes.section()
-    title = nodes.title('', 'A sub-subsection')
+    title = nodes.title('', text)
     subsection += title
     section += subsection
     page_section += section
-    assert seac._convert_node(title, _ctx()) == [('directive', ['# ### A sub-subsection'])]
+    return title
+
+
+def test_convert_node_title_two_sections_deep_py_uses_tilde():
+    title = _nest_title_three_deep('A sub-subsection')
+    assert seac._convert_node(title, _ctx(fmt='py')) == [
+        ('directive', ['# A sub-subsection', '# ~~~~~~~~~~~~~~~~'])
+    ]
+
+
+def test_convert_node_title_two_sections_deep_ipynb_uses_atx():
+    title = _nest_title_three_deep('A sub-subsection')
+    assert seac._convert_node(title, _ctx(fmt='ipynb')) == [
+        ('directive', ['# ### A sub-subsection'])
+    ]
 
 
 def test_convert_node_empty_title_returns_empty():
