@@ -96,6 +96,7 @@ ignore = ['D203', 'D211', 'D213']
 # sphinx-gallery example scripts: the module docstring is an RST page title
 # (title line + underline), not prose -- pydocstyle's summary-line rules don't apply.
 'tests/gallery_fixture/examples/*' = ['D205', 'D400', 'D415', 'T201']
+'tests/heading_level_fixture/examples/*' = ['D205', 'D400', 'D415', 'T201']
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

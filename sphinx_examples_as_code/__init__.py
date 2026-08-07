@@ -387,6 +387,23 @@ def _title_underline_segment(title: str, level: int = 1) -> Segment:
     return ('directive', [f'# {title}', f'# {underline}'])
 
 
+def _heading_level(title: nodes.title) -> int:
+    """Compute a title's heading level from its ``nodes.section`` nesting depth.
+
+    Counts the title's own section and each ancestor ``nodes.section``.
+    Running this on the file's own header would give level 1; a title
+    nested inside that comes out level 2, and so does anything nested
+    deeper (clamped -- the deepest level CommonMark's setext syntax can
+    represent).
+    """
+    level = 0
+    node: nodes.Node | None = title.parent
+    while isinstance(node, nodes.section):
+        level += 1
+        node = node.parent
+    return min(level, 2)
+
+
 def _convert_admonition(
     node: nodes.Element, label: str, ctx: _RenderContext, *, skip_first_title: bool = False
 ) -> list[Segment]:
@@ -425,10 +442,12 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
     if isinstance(node, nodes.title):
         # Gallery mode only: a sibling section's own heading (the page's own
         # outer title is filtered out before reaching here -- see
-        # _process_gallery_page). Level 2, one below the file's own level-1
-        # header -- renders as a real Markdown subheading in .ipynb.
+        # _process_gallery_page). Renders as a real Markdown heading in
+        # .ipynb, at a level relative to its own section nesting (see
+        # _heading_level).
         title_text = _render_inline(node, ctx).strip()
-        return [_title_underline_segment(title_text, level=2)] if title_text else []
+        level = _heading_level(node)
+        return [_title_underline_segment(title_text, level=level)] if title_text else []
     if isinstance(node, (*_CONTAINER_TYPES, nodes.section)):
         # nodes.section (gallery mode only): a sphinx-gallery ``# %%`` cell
         # with its own RST heading becomes a *sibling* section at the
