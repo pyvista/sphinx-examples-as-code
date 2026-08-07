@@ -549,15 +549,17 @@ def test_convert_node_empty_paragraph_returns_empty():
 
 
 def test_convert_node_section_title_becomes_heading_and_children_recurse():
-    # gallery mode: a "# %%" cell's own sibling section -- its title gets
-    # the same title+underline treatment as the file's own header, and its
-    # other children (prose, code, ...) get converted normally
+    # gallery mode: a "# %%" cell's own sibling section, nested one section
+    # inside the page's own title section -- the common case, where the
+    # cell heading's underline character differs from the page title's own
+    page_section = nodes.section()
     section = nodes.section()
     section += nodes.title('', 'A subsection')
     section += nodes.paragraph('', 'prose here')
     code_block = nodes.literal_block('', 'x = 1')
     code_block['language'] = 'Python'
     section += code_block
+    page_section += section
 
     assert seac._convert_node(section, _ctx()) == [
         ('directive', ['# A subsection', '# ------------']),
@@ -749,7 +751,7 @@ def test_header_segment_format():
     kind, lines = seac._header_segment('pyvista.read')
     assert kind == 'directive'
     assert lines[0] == '# Examples from pyvista.read'
-    assert lines[1] == '# ' + '-' * len('Examples from pyvista.read')
+    assert lines[1] == '# ' + '=' * len('Examples from pyvista.read')
 
 
 # ---------------------------------------------------------------------------
@@ -760,14 +762,81 @@ def test_header_segment_format():
 def test_title_underline_segment_format():
     kind, lines = seac._title_underline_segment('A Title')
     assert kind == 'directive'
+    assert lines == ['# A Title', '# =======']
+
+
+def test_title_underline_segment_level_2_uses_dashes():
+    kind, lines = seac._title_underline_segment('A Title', level=2)
+    assert kind == 'directive'
     assert lines == ['# A Title', '# -------']
 
 
-def test_convert_node_title_uses_underline_treatment():
-    # a standalone title, as reached via a gallery sibling section
+# ---------------------------------------------------------------------------
+# _heading_level
+# ---------------------------------------------------------------------------
+
+
+def test_heading_level_one_section_deep_is_level_2():
+    page_section = nodes.section()
+    section = nodes.section()
     title = nodes.title('', 'A subsection')
+    section += title
+    page_section += section
+    assert seac._heading_level(title) == 2
+
+
+def test_heading_level_two_sections_deep_is_clamped_to_2():
+    page_section = nodes.section()
+    section = nodes.section()
+    subsection = nodes.section()
+    title = nodes.title('', 'A sub-subsection')
+    subsection += title
+    section += subsection
+    page_section += section
+    assert seac._heading_level(title) == 2
+
+
+def test_heading_level_not_nested_under_anything_is_level_1():
+    # a section reusing the enclosing document's own top-level underline
+    # character starts a new section at that same level, per RST -- rather
+    # than nesting under whatever section precedes it
+    section = nodes.section()
+    title = nodes.title('', 'A reused-level heading')
+    section += title
+    assert seac._heading_level(title) == 1
+
+
+def test_heading_level_reused_top_level_char_then_nested_subsection():
+    # e.g. two page-level sections back to back, the second with its own
+    # nested subsection -- the subsection is level 2 relative to *its own*
+    # enclosing section, not to whatever came before it
+    top_level_section = nodes.section()
+    nested_section = nodes.section()
+    title = nodes.title('', 'Nested under the second section')
+    nested_section += title
+    top_level_section += nested_section
+    assert seac._heading_level(title) == 2
+
+
+def test_convert_node_title_uses_underline_treatment():
+    # nested one section inside a page's own title section -- the common
+    # case for a gallery sibling section's heading
+    page_section = nodes.section()
+    section = nodes.section()
+    title = nodes.title('', 'A subsection')
+    section += title
+    page_section += section
     assert seac._convert_node(title, _ctx()) == [
         ('directive', ['# A subsection', '# ------------'])
+    ]
+
+
+def test_convert_node_title_not_nested_uses_level_1():
+    section = nodes.section()
+    title = nodes.title('', 'A subsection')
+    section += title
+    assert seac._convert_node(title, _ctx()) == [
+        ('directive', ['# A subsection', '# ============'])
     ]
 
 
@@ -1643,7 +1712,7 @@ def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
     written = next((tmp_path / '_downloads').rglob('*.py'))
     lines = written.read_text(encoding='utf-8').splitlines()
     assert lines[0] == '# An example'
-    assert lines[1] == '# ' + '-' * len('An example')
+    assert lines[1] == '# ' + '=' * len('An example')
     assert not lines[0].startswith('# Examples from')
 
 
