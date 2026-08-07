@@ -445,13 +445,66 @@ def test_clean_code_comment_replaces_non_ascii_chars(unicode_char: int, ascii_ch
 
 
 # ---------------------------------------------------------------------------
+# _indent_comment_line / _indent_label_content
+# ---------------------------------------------------------------------------
+
+
+def test_indent_comment_line_indents_content():
+    assert seac._indent_comment_line('# hello') == '#     hello'
+
+
+def test_indent_comment_line_bare_hash_unchanged():
+    assert seac._indent_comment_line('#') == '#'
+
+
+def test_indent_comment_line_blank_separator_unchanged():
+    assert seac._indent_comment_line('') == ''
+
+
+def test_indent_comment_line_code_line_unchanged():
+    # no '#' prefix at all -- indenting it would change real Python source
+    assert seac._indent_comment_line('x = 1') == 'x = 1'
+
+
+def test_indent_label_content_py_indents_everything_after_the_first_line():
+    lines = ['# NOTE:', '# hello', '# world']
+    assert seac._indent_label_content(lines, 'py') == ['# NOTE:', '#     hello', '#     world']
+
+
+def test_indent_label_content_ipynb_unchanged():
+    lines = ['# NOTE:', '# hello', '# world']
+    assert seac._indent_label_content(lines, 'ipynb') == lines
+
+
+def test_indent_label_content_empty_list_unchanged():
+    assert seac._indent_label_content([], 'py') == []
+
+
+def test_indent_label_content_skips_only_the_first_line():
+    # a lone label with no content: nothing after it to indent
+    assert seac._indent_label_content(['# NOTE:'], 'py') == ['# NOTE:']
+
+
+# ---------------------------------------------------------------------------
 # _convert_admonition / _convert_node dispatch
 # ---------------------------------------------------------------------------
 
 
 def test_convert_node_note():
     doctree = _parse('.. note::\n\n   hello')
-    assert seac._convert_node(doctree[0], _ctx()) == [('directive', ['# NOTE:', '# hello'])]
+    assert seac._convert_node(doctree[0], _ctx(fmt='py')) == [
+        ('directive', ['# NOTE:', '#     hello'])
+    ]
+
+
+def test_convert_node_note_ipynb_not_indented():
+    # unlike .py, .ipynb content isn't indented under the label -- once
+    # rendered as markdown, leading whitespace within a paragraph collapses
+    # to nothing anyway
+    doctree = _parse('.. note::\n\n   hello')
+    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+        ('directive', ['# NOTE:', '# hello'])
+    ]
 
 
 def test_convert_node_seealso():
@@ -462,8 +515,8 @@ def test_convert_node_seealso():
     p2 += nodes.Text('More info')
     node += p1
     node += p2
-    assert seac._convert_node(node, _ctx()) == [
-        ('directive', ['# SEE ALSO:', '# See X', '# More info'])
+    assert seac._convert_node(node, _ctx(fmt='py')) == [
+        ('directive', ['# SEE ALSO:', '#     See X', '#     More info'])
     ]
 
 
@@ -478,7 +531,10 @@ def test_convert_node_seealso_propagates_in_see_also_to_references():
     ctx = _ctx(fmt='py', base_url='https://docs.pyvista.org/')
     segments = seac._convert_node(node, ctx)
     assert segments == [
-        ('directive', ['# SEE ALSO:', '# pyvista.Plotter https://docs.pyvista.org/plotter.html'])
+        (
+            'directive',
+            ['# SEE ALSO:', '#     pyvista.Plotter https://docs.pyvista.org/plotter.html'],
+        )
     ]
 
 
@@ -490,8 +546,8 @@ def test_convert_node_see_also_section_treated_like_admonition():
 
 def test_convert_node_generic_admonition_uses_title():
     doctree = _parse('.. admonition:: Custom Title\n\n   body text')
-    assert seac._convert_node(doctree[0], _ctx()) == [
-        ('directive', ['# Custom Title:', '# body text'])
+    assert seac._convert_node(doctree[0], _ctx(fmt='py')) == [
+        ('directive', ['# Custom Title:', '#     body text'])
     ]
 
 
@@ -500,12 +556,22 @@ def test_convert_node_generic_admonition_no_title_defaults_to_note():
     p = nodes.paragraph()
     p += nodes.Text('body')
     node += p
-    assert seac._convert_node(node, _ctx()) == [('directive', ['# NOTE:', '# body'])]
+    assert seac._convert_node(node, _ctx(fmt='py')) == [('directive', ['# NOTE:', '#     body'])]
 
 
 def test_convert_node_admonition_with_no_body_keeps_label():
     node = nodes.note()
     assert seac._convert_node(node, _ctx()) == [('directive', ['# NOTE:'])]
+
+
+def test_convert_node_note_with_code_indents_text_not_code():
+    # a doctest example inside a note: the surrounding prose is indented
+    # under the label, but the code itself is left flush -- indenting it
+    # would be invalid Python (it isn't actually nested inside anything)
+    doctree = _parse('.. note::\n\n   See below.\n\n   >>> x = 1')
+    assert seac._convert_node(doctree[0], _ctx(fmt='py')) == [
+        ('directive', ['# NOTE:', '#     See below.', 'x = 1'])
+    ]
 
 
 def test_convert_node_skip_subtree_class():
@@ -1226,7 +1292,7 @@ def test_build_segments_bare_rubric_see_also_affects_only_what_follows():
             'directive',
             [
                 '# SEE ALSO:',
-                '# pyvista.Plotter https://docs.pyvista.org/plotter.html',
+                '#     pyvista.Plotter https://docs.pyvista.org/plotter.html',
                 'x = 1',
             ],
         )
@@ -1352,7 +1418,7 @@ def test_process_span_includes_external_see_also(tmp_path: Path):
     written = next((tmp_path / '_downloads').rglob('*.py'))
     content = written.read_text()
     assert '# SEE ALSO:' in content
-    assert '# related info' in content
+    assert '#     related info' in content
 
 
 def test_process_span_appends_footer_with_blank_line_before(tmp_path: Path):

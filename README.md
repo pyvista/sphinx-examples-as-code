@@ -80,9 +80,11 @@ What happens to the content of an Examples section:
 - `.. code-block:: python` (or `py`) blocks are kept as-is; other languages become
   comments, set off with blank lines on both sides like any other directive.
 - Admonitions (`.. note::`, `.. warning::`, `.. seealso::`, ...) become a `# LABEL:`
-  comment followed by their content as comments. "See Also" is recognized in any of its
-  three forms (`.. seealso::`, a bare `.. rubric:: See Also`, or a hand-written `See
-  Also` heading) and always renders the same way.
+  comment followed by their content as comments, indented one level under the label in
+  `.py` (not `.ipynb`, where leading whitespace within a paragraph has no visible effect
+  once rendered). "See Also" is recognized in any of its three forms (`.. seealso::`, a
+  bare `.. rubric:: See Also`, or a hand-written `See Also` heading) and always renders
+  the same way.
 - Cross-references and inline code (`:class:`, `:meth:`, `:func:`, `:attr:`,
   double-backtick literals, ...) keep their display text, wrapped in backticks (e.g.
   ``:class:`pyvista.Plotter` `` -> `` `pyvista.Plotter` ``). If `html_baseurl` is set and
