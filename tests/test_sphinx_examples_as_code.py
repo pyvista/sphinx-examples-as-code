@@ -749,7 +749,7 @@ def test_header_segment_format():
     kind, lines = seac._header_segment('pyvista.read')
     assert kind == 'directive'
     assert lines[0] == '# Examples from pyvista.read'
-    assert lines[1] == '# ' + '-' * len('Examples from pyvista.read')
+    assert lines[1] == '# ' + '=' * len('Examples from pyvista.read')
 
 
 # ---------------------------------------------------------------------------
@@ -759,6 +759,12 @@ def test_header_segment_format():
 
 def test_title_underline_segment_format():
     kind, lines = seac._title_underline_segment('A Title')
+    assert kind == 'directive'
+    assert lines == ['# A Title', '# =======']
+
+
+def test_title_underline_segment_level_2_uses_dashes():
+    kind, lines = seac._title_underline_segment('A Title', level=2)
     assert kind == 'directive'
     assert lines == ['# A Title', '# -------']
 
@@ -1643,7 +1649,7 @@ def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
     written = next((tmp_path / '_downloads').rglob('*.py'))
     lines = written.read_text(encoding='utf-8').splitlines()
     assert lines[0] == '# An example'
-    assert lines[1] == '# ' + '-' * len('An example')
+    assert lines[1] == '# ' + '=' * len('An example')
     assert not lines[0].startswith('# Examples from')
 
 

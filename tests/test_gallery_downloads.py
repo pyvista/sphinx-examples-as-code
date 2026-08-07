@@ -71,10 +71,7 @@ def _is_ours(path: Path) -> bool:
     -- ours is identifiable structurally, by the title+underline header this
     extension always starts a generated file with (its first two lines in
     ``.py``, or its first markdown cell's first two lines in ``.ipynb``): a
-    title line followed by a line of dashes matching that title's length.
-    Gallery mode uses the page's own title there now rather than a fixed
-    "# Examples from ..." prefix, so this can't just check for one fixed
-    string the way it used to.
+    title line followed by a line of ``=`` matching that title's length.
     """
     if path.suffix == '.py':
         lines = path.read_text(encoding='utf-8').splitlines()
@@ -90,7 +87,7 @@ def _is_ours(path: Path) -> bool:
     title, underline = lines[0], lines[1]
     if path.suffix == '.py':
         title, underline = title.removeprefix('# '), underline.removeprefix('# ')
-    return bool(title) and underline == '-' * len(title)
+    return bool(title) and underline == '=' * len(title)
 
 
 def test_gallery_downloads_disabled_by_default(tmp_path: Path):
@@ -151,7 +148,7 @@ def test_gallery_downloads_py_content(gallery_build: tuple[Path, str]):
 
     # the page's own title, not a generic "Examples from <docname>" header
     assert src.startswith(
-        '# A minimal gallery example\n# ' + '-' * len('A minimal gallery example')
+        '# A minimal gallery example\n# ' + '=' * len('A minimal gallery example')
     )
     assert 'x = 1' in src
     assert 'y = 2' in src
@@ -224,7 +221,7 @@ def test_gallery_downloads_footer_is_its_own_dedicated_ipynb_cell(gallery_build:
 def test_gallery_downloads_sibling_section_heading_is_markdown_in_ipynb(
     gallery_build: tuple[Path, str],
 ):
-    """The same underline treatment is what makes it a real Markdown heading here."""
+    """The sibling section's heading is a level-2 (``-`` underline) Markdown heading."""
     html_dir, _html = gallery_build
     notebook = json.loads(_generated(html_dir, '.ipynb').read_text(encoding='utf-8'))
     heading_cell = next(
@@ -234,6 +231,18 @@ def test_gallery_downloads_sibling_section_heading_is_markdown_in_ipynb(
     )
     source = ''.join(heading_cell['source'])
     assert '-' * len('A headed cell') in source  # setext underline
+
+
+def test_gallery_downloads_page_title_is_level_1_sibling_heading_is_level_2(
+    gallery_build: tuple[Path, str],
+):
+    """The page's own title (``=``) outranks a sibling section's heading (``-``)."""
+    html_dir, _html = gallery_build
+    notebook = json.loads(_generated(html_dir, '.ipynb').read_text(encoding='utf-8'))
+    title_cell = notebook['cells'][0]
+    title_source = ''.join(title_cell['source'])
+    assert '=' * len('A minimal gallery example') in title_source
+    assert '-' * len('A minimal gallery example') not in title_source
 
 
 def test_gallery_downloads_generated_py_executes(gallery_build: tuple[Path, str]):

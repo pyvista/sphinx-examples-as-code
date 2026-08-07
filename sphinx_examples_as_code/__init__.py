@@ -368,15 +368,22 @@ def _convert_literal_block(node: nodes.literal_block) -> list[Segment]:
     return [('directive', comment_lines)]
 
 
-def _title_underline_segment(title: str) -> Segment:
-    """Build a title + underline directive segment, e.g. ``# Title`` + ``# -----``.
+#: Setext underline character per heading level -- ``=`` for the file's own
+#: top-level header (level 1), ``-`` for a subheading (level 2). CommonMark's
+#: setext syntax only supports these two levels.
+_TITLE_UNDERLINE_CHARS = {1: '=', 2: '-'}
 
-    Shared by the file's own header (see ``_header_segment``) and gallery
-    mode's sibling-section headings. The underline is what makes this render
-    as a real Markdown heading in ``.ipynb`` (setext-style, once the ``#``
-    comment prefix is stripped for markdown cells) rather than plain text.
+
+def _title_underline_segment(title: str, level: int = 1) -> Segment:
+    """Build a title + underline directive segment, e.g. ``# Title`` + ``# =====``.
+
+    Shared by the file's own header (see ``_header_segment``), which is
+    always level 1, and gallery mode's sibling-section headings, which are
+    level 2. The underline is what makes this render as a real Markdown
+    heading in ``.ipynb`` (setext-style, once the ``#`` comment prefix is
+    stripped for markdown cells) rather than plain text.
     """
-    underline = '-' * len(title)
+    underline = _TITLE_UNDERLINE_CHARS[level] * len(title)
     return ('directive', [f'# {title}', f'# {underline}'])
 
 
@@ -418,12 +425,10 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
     if isinstance(node, nodes.title):
         # Gallery mode only: a sibling section's own heading (the page's own
         # outer title is filtered out before reaching here -- see
-        # _process_gallery_page). Same title+underline treatment as the
-        # file's own header, so it reads as a real heading -- and renders as
-        # an actual Markdown heading in .ipynb -- instead of melting into
-        # whatever prose follows it with no visual break.
+        # _process_gallery_page). Level 2, one below the file's own level-1
+        # header -- renders as a real Markdown subheading in .ipynb.
         title_text = _render_inline(node, ctx).strip()
-        return [_title_underline_segment(title_text)] if title_text else []
+        return [_title_underline_segment(title_text, level=2)] if title_text else []
     if isinstance(node, (*_CONTAINER_TYPES, nodes.section)):
         # nodes.section (gallery mode only): a sphinx-gallery ``# %%`` cell
         # with its own RST heading becomes a *sibling* section at the

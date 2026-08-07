@@ -243,7 +243,7 @@ def test_header_format(built: tuple[Path, list[Path]]):
     lines = src.splitlines()
     assert lines[0] == '# Examples from docstring_cases.case_note'
     title = lines[0].removeprefix('# ')
-    assert lines[1] == '# ' + '-' * len(title)
+    assert lines[1] == '# ' + '=' * len(title)
     assert len(lines[0]) == len(lines[1])
     # blank line between the header and the rest of the content
     assert lines[2] == ''

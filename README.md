@@ -128,7 +128,9 @@ is left completely untouched. Gallery pages and ordinary docstring/prose pages (
 the Examples-section behavior above) can coexist on the same site.
 
 A `# %%` cell with its own RST heading gets the same title-plus-underline treatment as
-the file's own header, and renders as a real Markdown heading in `.ipynb`.
+the file's own header, one level down (`# Title` + `# ====` for the file's own header,
+`# Title` + `# ----` for the cell's), and renders as a real Markdown heading in `.ipynb`
+(`<h1>`/`<h2>` respectively).
 
 Two things worth knowing before turning this on:
 
