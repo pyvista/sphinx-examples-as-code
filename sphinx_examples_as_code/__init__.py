@@ -411,6 +411,36 @@ def _heading_level(title: nodes.title) -> int:
     return min(level, _MAX_HEADING_LEVEL)
 
 
+#: Extra indent for an admonition's content, under its ``# LABEL:`` line --
+#: ``.py`` only (see ``_convert_admonition``).
+_ADMONITION_CONTENT_INDENT = '    '
+
+
+def _indent_comment_line(line: str) -> str:
+    """Indent a ``# text`` comment line's content by ``_ADMONITION_CONTENT_INDENT``.
+
+    A bare ``#`` (blank line within a comment block) or a blank separator
+    line (``''``) has no content to indent, so both pass through unchanged
+    -- as does a raw code line (no ``#`` prefix at all), left alone so
+    indenting an admonition's content never touches real Python source.
+    """
+    if not line.startswith('# '):
+        return line
+    return f'# {_ADMONITION_CONTENT_INDENT}{line.removeprefix("# ")}'
+
+
+def _indent_label_content(lines: list[str], fmt: str) -> list[str]:
+    """Indent every line after the first (a ``# LABEL:`` line) under it.
+
+    ``.py`` only: in ``.ipynb``, once rendered as markdown, leading
+    whitespace within a paragraph collapses to nothing (confirmed against a
+    real CommonMark parse), so it would be invisible there anyway.
+    """
+    if fmt != 'py' or not lines:
+        return lines
+    return [lines[0], *(_indent_comment_line(line) for line in lines[1:])]
+
+
 def _convert_admonition(
     node: nodes.Element, label: str, ctx: _RenderContext, *, skip_first_title: bool = False
 ) -> list[Segment]:
@@ -421,7 +451,8 @@ def _convert_admonition(
         if skip_first_title and isinstance(child, nodes.title):
             continue
         inner.extend(_convert_node(child, inner_ctx))
-    return [('directive', _join_segments(inner))]
+    lines = _indent_label_content(_join_segments(inner), ctx.fmt)
+    return [('directive', lines)]
 
 
 def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
@@ -782,7 +813,8 @@ def _build_segments(nodes_in_span: list[nodes.Node], ctx: _RenderContext) -> lis
             inner: list[Segment] = [('text', ['# SEE ALSO:'])]
             for later_node in nodes_in_span[i + 1 :]:
                 inner.extend(_convert_node(later_node, inner_ctx))
-            segments.append(('directive', _join_segments(inner)))
+            lines = _indent_label_content(_join_segments(inner), ctx.fmt)
+            segments.append(('directive', lines))
             break
         segments.extend(_convert_node(node, ctx))
     return segments

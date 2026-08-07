@@ -177,14 +177,14 @@ def test_docstring_examples_conversion(built: tuple[Path, list[Path]]):
 
     note_src = _read(examples, 'case_note')
     assert '# NOTE:' in note_src
-    assert '# This is a note' in note_src
+    assert '#     This is a note' in note_src  # indented under the label
 
     warning_src = _read(examples, 'case_warning')
     assert '# WARNING:' in warning_src
 
     multi_note_src = _read(examples, 'case_multi_paragraph_note')
-    assert '# First paragraph of the note.' in multi_note_src
-    assert '# Second paragraph of the note.' in multi_note_src
+    assert '#     First paragraph of the note.' in multi_note_src
+    assert '#     Second paragraph of the note.' in multi_note_src
 
     admonition_src = _read(examples, 'case_generic_admonition')
     assert '# Custom Title:' in admonition_src
@@ -307,10 +307,10 @@ def test_seealso_admonition(built: tuple[Path, list[Path]]):
     """
     src = _read(built[1], 'case_seealso')
     assert '# SEE ALSO:' in src
-    assert '# Some Target' in src
-    assert '# See this in the gallery for more info.' in src
+    assert '#     Some Target' in src
+    assert '#     See this in the gallery for more info.' in src
     # each paragraph must be its own line -- not concatenated together
-    assert 'Some Target\n# See' in src or 'Some TargetSee' not in src
+    assert 'Some Target\n#     See' in src or 'Some TargetSee' not in src
 
 
 def test_stray_markup_in_doctest_comment_cleaned(built: tuple[Path, list[Path]]):
@@ -530,7 +530,7 @@ def test_base_url_set_resolves_links(tmp_path: Path):
     ):
         py_src = _read(py_files, name)
         assert '# SEE ALSO:' in py_src
-        assert '# docstring_cases.Sample https://docs.example.com/' in py_src
+        assert '#     docstring_cases.Sample https://docs.example.com/' in py_src
         assert '`docstring_cases.Sample`' not in py_src  # no backticks in See Also url lines
 
         nb_path = next(p for p in ipynb_files if p.stem == f'docstring_cases_{name}')
