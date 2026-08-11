@@ -486,6 +486,130 @@ def test_indent_label_content_skips_only_the_first_line():
 
 
 # ---------------------------------------------------------------------------
+# _definition_segment
+# ---------------------------------------------------------------------------
+
+
+def _definition_list_item(term_text: str, definition_text: str) -> nodes.definition_list_item:
+    item = nodes.definition_list_item()
+    term = nodes.term('', term_text)
+    definition = nodes.definition()
+    definition += nodes.paragraph('', definition_text)
+    item += term
+    item += definition
+    return item
+
+
+def test_definition_segment_py_indents_content():
+    item = _definition_list_item('Bunny Dataset', 'See the gallery for more info.')
+    definition = item[1]
+    assert seac._convert_node(definition, _ctx(fmt='py')) == [
+        ('text', ['#     See the gallery for more info.'])
+    ]
+
+
+def test_definition_segment_ipynb_not_indented():
+    item = _definition_list_item('Bunny Dataset', 'See the gallery for more info.')
+    definition = item[1]
+    assert seac._convert_node(definition, _ctx(fmt='ipynb')) == [
+        ('text', ['# See the gallery for more info.'])
+    ]
+
+
+def test_definition_segment_empty_returns_empty():
+    assert seac._convert_node(nodes.definition(), _ctx()) == []
+
+
+def test_convert_node_definition_list_item_term_not_indented_definition_is():
+    # the term itself stays at the surrounding indent level -- only its
+    # definition (the body nested under it) gets the extra indent
+    item = _definition_list_item('Bunny Dataset', 'See the gallery for more info.')
+    segments = seac._convert_node(item, _ctx(fmt='py'))
+    lines = seac._join_segments(segments)
+    assert lines == ['# Bunny Dataset', '#     See the gallery for more info.']
+
+
+# ---------------------------------------------------------------------------
+# _list_segment
+# ---------------------------------------------------------------------------
+
+
+def _bullet_list(*item_texts: str) -> nodes.bullet_list:
+    blist = nodes.bullet_list()
+    for text in item_texts:
+        item = nodes.list_item()
+        item += nodes.paragraph('', text)
+        blist += item
+    return blist
+
+
+def _enumerated_list(*item_texts: str) -> nodes.enumerated_list:
+    elist = nodes.enumerated_list()
+    for text in item_texts:
+        item = nodes.list_item()
+        item += nodes.paragraph('', text)
+        elist += item
+    return elist
+
+
+def test_list_segment_bullet_list_marks_each_item():
+    blist = _bullet_list('Load and Plot from a File', 'Clipping with a Surface')
+    assert seac._convert_node(blist, _ctx()) == [
+        ('directive', ['# - Load and Plot from a File', '# - Clipping with a Surface'])
+    ]
+
+
+def test_list_segment_enumerated_list_numbers_each_item():
+    elist = _enumerated_list('First step', 'Second step')
+    assert seac._convert_node(elist, _ctx()) == [
+        ('directive', ['# 1. First step', '# 2. Second step'])
+    ]
+
+
+def test_list_segment_is_directive_kind_for_blank_lines_both_sides():
+    # a real CommonMark parse confirms a '-'/'1.' line directly following
+    # other text with no blank line before it doesn't start a list at all
+    # -- it reads as more of the same paragraph, marker included
+    blist = _bullet_list('Only item')
+    kind, _lines = seac._convert_node(blist, _ctx())[0]
+    assert kind == 'directive'
+
+
+def test_list_segment_empty_bullet_list_returns_empty():
+    assert seac._convert_node(nodes.bullet_list(), _ctx()) == []
+
+
+def test_list_segment_empty_item_skipped():
+    # a list item with no real content contributes no line -- doesn't
+    # leave a bare, unmarked entry behind
+    blist = _bullet_list('Real item')
+    blist += nodes.list_item()  # empty
+    assert seac._convert_node(blist, _ctx()) == [('directive', ['# - Real item'])]
+
+
+def test_list_segment_non_list_item_child_skipped():
+    # defensive: docutils only ever puts list_item children in a
+    # bullet/enumerated list, but a hand-built tree could have anything
+    blist = _bullet_list('Real item')
+    blist += nodes.comment()
+    assert seac._convert_node(blist, _ctx()) == [('directive', ['# - Real item'])]
+
+
+def test_list_segment_ipynb_link_item_renders_as_markdown_link():
+    item = nodes.list_item()
+    paragraph = nodes.paragraph()
+    reference = nodes.reference('', refuri='https://example.com/read')
+    reference += nodes.Text('Load and Plot from a File')
+    paragraph += reference
+    item += paragraph
+    blist = nodes.bullet_list()
+    blist += item
+    assert seac._convert_node(blist, _ctx(fmt='ipynb')) == [
+        ('directive', ['# - [Load and Plot from a File](https://example.com/read)'])
+    ]
+
+
+# ---------------------------------------------------------------------------
 # _convert_admonition / _convert_node dispatch
 # ---------------------------------------------------------------------------
 
@@ -605,9 +729,11 @@ def test_convert_node_versionmodified():
 
 
 def test_convert_node_container_recurses():
-    doctree = _parse('- item one\n- item two')
-    segments = seac._convert_node(doctree[0], _ctx())
-    assert segments == [('text', ['# item one']), ('text', ['# item two'])]
+    # a block_quote is a pure structural wrapper -- no marker, no indent,
+    # unlike bullet/enumerated lists (see _list_segment) which need both
+    doctree = _parse('Intro\n\n   quoted text')
+    segments = seac._convert_node(doctree[1], _ctx())
+    assert segments == [('text', ['# quoted text'])]
 
 
 def test_convert_node_empty_paragraph_returns_empty():

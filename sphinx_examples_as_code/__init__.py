@@ -71,13 +71,14 @@ _SKIP_SUBTREE_CLASSES = (
     'tags',
 )
 
+#: Recursed into with no special formatting -- pure structural wrappers.
+#: bullet/enumerated lists and definitions get their own handling instead
+#: (see ``_list_segment``/``_definition_segment``), since they need actual
+#: markup (a ``-``/``N.`` marker, extra indent) to read as anything other
+#: than plain paragraphs once flattened into comment lines.
 _CONTAINER_TYPES = (
-    nodes.bullet_list,
-    nodes.enumerated_list,
     nodes.definition_list,
     nodes.definition_list_item,
-    nodes.list_item,
-    nodes.definition,
     nodes.term,
     nodes.classifier,
     nodes.block_quote,
@@ -441,6 +442,54 @@ def _indent_label_content(lines: list[str], fmt: str) -> list[str]:
     return [lines[0], *(_indent_comment_line(line) for line in lines[1:])]
 
 
+def _definition_segment(node: nodes.definition, ctx: _RenderContext) -> list[Segment]:
+    """Convert a definition list's ``definition`` (its indented body), one level under its term.
+
+    ``.py`` only, same as ``_indent_label_content`` and for the same
+    reason: invisible once collapsed by a Markdown renderer in ``.ipynb``.
+    """
+    segments: list[Segment] = []
+    for child in node.children:
+        segments.extend(_convert_node(child, ctx))
+    lines = _join_segments(segments)
+    if ctx.fmt == 'py':
+        lines = [_indent_comment_line(line) for line in lines]
+    return [('text', lines)] if lines else []
+
+
+def _list_segment(
+    node: nodes.bullet_list | nodes.enumerated_list, ctx: _RenderContext
+) -> list[Segment]:
+    """Convert a bullet/enumerated list to one ``-``/``N.``-marked line per item.
+
+    A blank line on both sides (``'directive'`` kind) rather than flowing
+    straight from whatever precedes it: confirmed against a real CommonMark
+    parse that a ``-``/``1.`` line directly following other text with no
+    blank line in between doesn't start a list at all, it's read as more of
+    the same paragraph -- the marker included, as literal text.
+
+    A multi-line item's continuation lines get the same indent as an
+    admonition's content, to keep them visually under the item's marker.
+    """
+    ordered = isinstance(node, nodes.enumerated_list)
+    lines: list[str] = []
+    for index, item in enumerate(node.children, start=1):
+        if not isinstance(item, nodes.list_item):
+            continue
+        item_segments: list[Segment] = []
+        for child in item.children:
+            item_segments.extend(_convert_node(child, ctx))
+        item_lines = _join_segments(item_segments)
+        if not item_lines:
+            continue
+        marker = f'{index}. ' if ordered else '- '
+        first, *rest = item_lines
+        first = f'# {marker}{first.removeprefix("# ")}' if first.startswith('# ') else first
+        lines.append(first)
+        lines.extend(_indent_comment_line(line) for line in rest)
+    return [('directive', lines)] if lines else []
+
+
 def _convert_admonition(
     node: nodes.Element, label: str, ctx: _RenderContext, *, skip_first_title: bool = False
 ) -> list[Segment]:
@@ -486,6 +535,10 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
         title_text = _render_inline(node, ctx).strip()
         level = _heading_level(node)
         return [_title_underline_segment(title_text, level, ctx.fmt)] if title_text else []
+    if isinstance(node, nodes.definition):
+        return _definition_segment(node, ctx)
+    if isinstance(node, (nodes.bullet_list, nodes.enumerated_list)):
+        return _list_segment(node, ctx)
     if isinstance(node, (*_CONTAINER_TYPES, nodes.section)):
         # nodes.section (gallery mode only): a sphinx-gallery ``# %%`` cell
         # with its own RST heading becomes a *sibling* section at the
