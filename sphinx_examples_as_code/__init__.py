@@ -849,7 +849,7 @@ def _build_download_entries(
 
     py_header = _title_underline_segment(header_title, 1, 'py')
     py_segments_full = [py_header, *py_segments, *_footer_segment(footer, 'py', app, docname)]
-    source = '\n'.join(_join_segments(py_segments_full)).rstrip() + '\n\n'
+    source = '\n'.join(_join_segments(py_segments_full)).rstrip() + '\n'
 
     if not _has_real_code(source):
         return []
