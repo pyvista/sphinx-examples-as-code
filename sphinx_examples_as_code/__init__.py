@@ -403,6 +403,34 @@ def _indent_comment_line(line: str) -> str:
     return f'# {_ADMONITION_CONTENT_INDENT}{line.removeprefix("# ")}'
 
 
+def _is_raw_code_line(line: str) -> bool:
+    """Check whether a rendered ``.py`` line is real code, not a ``#`` comment line."""
+    return bool(line) and not line.startswith('#')
+
+
+def _fill_comment_gaps(lines: list[str]) -> list[str]:
+    """Turn a blank separator line into a bare ``#`` unless it borders raw code.
+
+    ``_join_segments`` forces a blank line around some segment boundaries
+    (e.g. a paragraph followed by a nested list) meant to visually separate
+    unrelated top-level content. Folded into one ``# LABEL:`` comment block
+    instead (see ``_indent_label_content``/``_definition_segment``), that
+    same blank line needs a ``#`` to still read as part of that one block.
+    A blank line bordering a raw code line (left flush and uncommented --
+    see ``_convert_node``'s doctest/literal-block handling) stays blank,
+    since that boundary really is between code and comment.
+    """
+    result: list[str] = []
+    for i, line in enumerate(lines):
+        if line != '':
+            result.append(line)
+            continue
+        before = lines[i - 1] if i > 0 else ''
+        after = lines[i + 1] if i + 1 < len(lines) else ''
+        result.append(line if _is_raw_code_line(before) or _is_raw_code_line(after) else '#')
+    return result
+
+
 def _indent_label_content(lines: list[str], fmt: str) -> list[str]:
     """Indent every line after the first (a ``# LABEL:`` line) under it.
 
@@ -410,7 +438,8 @@ def _indent_label_content(lines: list[str], fmt: str) -> list[str]:
     """
     if fmt != 'py' or not lines:
         return lines
-    return [lines[0], *(_indent_comment_line(line) for line in lines[1:])]
+    label, *rest = _fill_comment_gaps(lines)
+    return [label, *(_indent_comment_line(line) for line in rest)]
 
 
 def _definition_segment(node: nodes.definition, ctx: _RenderContext) -> list[Segment]:
@@ -423,7 +452,7 @@ def _definition_segment(node: nodes.definition, ctx: _RenderContext) -> list[Seg
         segments.extend(_convert_node(child, ctx))
     lines = _join_segments(segments)
     if ctx.fmt == 'py':
-        lines = [_indent_comment_line(line) for line in lines]
+        lines = [_indent_comment_line(line) for line in _fill_comment_gaps(lines)]
     return [('text', lines)] if lines else []
 
 

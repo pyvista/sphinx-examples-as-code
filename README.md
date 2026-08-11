@@ -93,9 +93,11 @@ What happens to the content of an Examples section:
   `.. rubric:: See Also`, or a hand-written `See Also` heading) and always renders the
   same way.
 - A bullet/numbered list becomes a `-`/`N.`-marked line per item, set off with a blank
-  line on both sides in either format. A definition list's term stays at the surrounding
-  indent; its definition (the body nested under it) is indented one level further in
-  `.py`, same as an admonition's own content.
+  line on both sides in either format — a bare `#` instead of a real blank line when
+  that falls inside an admonition or a definition's own body in `.py`, so the whole
+  thing still reads as one unbroken comment block. A definition list's term stays at
+  the surrounding indent; its definition (the body nested under it) is indented one
+  level further in `.py`, same as an admonition's own content.
 - Cross-references and inline code (`:class:`, `:meth:`, `:func:`, `:attr:`,
   double-backtick literals, ...) keep their display text, wrapped in backticks (e.g.
   ``:class:`pyvista.Plotter` `` -> `` `pyvista.Plotter` ``). If `html_baseurl` is set and

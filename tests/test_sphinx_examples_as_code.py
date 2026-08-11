@@ -491,6 +491,68 @@ def test_indent_label_content_skips_only_the_first_line():
     assert seac._indent_label_content(['# NOTE:'], 'py') == ['# NOTE:']
 
 
+def test_indent_label_content_fills_gap_between_two_comment_lines():
+    # a forced blank between a paragraph and a following list (see
+    # _join_segments) must not read as the comment block ending partway
+    # through
+    lines = ['# SEE ALSO:', '# intro', '', '# - item one']
+    assert seac._indent_label_content(lines, 'py') == [
+        '# SEE ALSO:',
+        '#     intro',
+        '#',
+        '#     - item one',
+    ]
+
+
+def test_indent_label_content_keeps_real_blank_next_to_code():
+    # a blank line bordering raw, uncommented code (see
+    # test_convert_node_note_with_code_indents_text_not_code) stays a real
+    # blank line -- turning it into '#' would misrepresent it as a comment
+    lines = ['# NOTE:', '# intro', '', 'x = 1']
+    assert seac._indent_label_content(lines, 'py') == ['# NOTE:', '#     intro', '', 'x = 1']
+
+
+# ---------------------------------------------------------------------------
+# _fill_comment_gaps
+# ---------------------------------------------------------------------------
+
+
+def test_fill_comment_gaps_between_comments_becomes_hash():
+    assert seac._fill_comment_gaps(['# a', '', '# b']) == ['# a', '#', '# b']
+
+
+def test_fill_comment_gaps_next_to_code_stays_blank():
+    assert seac._fill_comment_gaps(['# a', '', 'x = 1']) == ['# a', '', 'x = 1']
+    assert seac._fill_comment_gaps(['x = 1', '', '# a']) == ['x = 1', '', '# a']
+
+
+def test_fill_comment_gaps_leading_and_trailing_blank():
+    assert seac._fill_comment_gaps(['', '# a']) == ['#', '# a']
+    assert seac._fill_comment_gaps(['# a', '']) == ['# a', '#']
+
+
+def test_fill_comment_gaps_no_blanks_unchanged():
+    lines = ['# a', '# b']
+    assert seac._fill_comment_gaps(lines) == lines
+
+
+# ---------------------------------------------------------------------------
+# _is_raw_code_line
+# ---------------------------------------------------------------------------
+
+
+def test_is_raw_code_line_true_for_code():
+    assert seac._is_raw_code_line('x = 1')
+
+
+def test_is_raw_code_line_false_for_comment():
+    assert not seac._is_raw_code_line('# x = 1')
+
+
+def test_is_raw_code_line_false_for_blank():
+    assert not seac._is_raw_code_line('')
+
+
 # ---------------------------------------------------------------------------
 # _definition_segment
 # ---------------------------------------------------------------------------
@@ -524,6 +586,23 @@ def test_definition_segment_ipynb_not_indented():
 
 def test_definition_segment_empty_returns_empty():
     assert seac._convert_node(nodes.definition(), _ctx()) == []
+
+
+def test_definition_segment_py_fills_gap_before_nested_list():
+    # a paragraph followed by a nested bullet list inside one definition --
+    # the forced blank line between them (see _join_segments) must not
+    # break the definition out of its own '#'-commented block
+    definition = nodes.definition()
+    definition += nodes.paragraph('', 'intro text')
+    bullet_list = nodes.bullet_list()
+    item = nodes.list_item()
+    item += nodes.paragraph('', 'first item')
+    bullet_list += item
+    definition += bullet_list
+
+    assert seac._convert_node(definition, _ctx(fmt='py')) == [
+        ('text', ['#     intro text', '#', '#     - first item'])
+    ]
 
 
 def test_convert_node_definition_list_item_term_not_indented_definition_is():

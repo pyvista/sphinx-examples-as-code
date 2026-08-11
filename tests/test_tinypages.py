@@ -330,9 +330,10 @@ def test_seealso_structured_py(built: tuple[Path, list[Path]]):
     assert lines[term_idx + 1] == '#         See this dataset in the gallery for more info.'
 
     intro_idx = lines.index('#     This dataset is used in the following examples:')
-    # the bullet list is set off with a blank line before it, each item
-    # '- '-marked, back at the base (non-definition) indent level
-    assert lines[intro_idx + 1] == ''
+    # the bullet list is set off with a bare '#' before it (not a real blank
+    # line -- the whole SEE ALSO body stays one unbroken comment block),
+    # each item '- '-marked, back at the base (non-definition) indent level
+    assert lines[intro_idx + 1] == '#'
     assert lines[intro_idx + 2] == '#     - Some Target'
     assert lines[intro_idx + 3] == '#     - Some Target'
 
