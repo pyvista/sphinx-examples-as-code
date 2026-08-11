@@ -24,6 +24,8 @@ from sphinx.errors import ConfigError
 from ._version import __version__
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from sphinx.application import Sphinx
     from sphinx.config import Config
 
@@ -154,6 +156,7 @@ class _RenderContext:
     fmt: str  # 'py' or 'ipynb'
     in_see_also: bool = False
     in_footer: bool = False
+    show_see_also: bool = True
 
 
 def _normalized_html_baseurl(app: Sphinx) -> str | None:
@@ -476,11 +479,15 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
     if isinstance(node, nodes.literal_block):
         return _convert_literal_block(node)
     if type(node) in _ADMONITION_LABELS:
+        if _is_see_also_type(node) and not ctx.show_see_also:
+            return []
         return _convert_admonition(node, _ADMONITION_LABELS[type(node)], ctx)
     if _is_see_also_section(node):
         # a hand-written "See Also\n--------" heading nests as a full
         # section rather than a flat sibling - treat it like the
         # ``.. seealso::`` directive it's standing in for.
+        if not ctx.show_see_also:
+            return []
         return _convert_admonition(node, 'SEE ALSO', ctx, skip_first_title=True)
     if isinstance(node, nodes.admonition):
         # generic ``.. admonition:: Custom Title`` - use its own title as the label
@@ -553,17 +560,44 @@ def _span_from(parent: nodes.Element, start: int) -> int:
     return end
 
 
-def _find_external_see_also(parent: nodes.Element, start: int, end: int) -> nodes.Node | None:
+def _is_see_also_type(node: nodes.Node) -> bool:
+    """Check whether ``node`` is a "See Also" admonition-type node (e.g. ``.. seealso::``)."""
+    return type(node) in _ADMONITION_LABELS and _ADMONITION_LABELS[type(node)] == 'SEE ALSO'
+
+
+def _see_also_in_desc_content(desc: addnodes.desc) -> nodes.Node | None:
+    """Find a "See Also" admonition-type node among a ``desc`` node's own ``desc_content``."""
+    content = next(
+        (child for child in desc.children if isinstance(child, addnodes.desc_content)), None
+    )
+    if content is None:
+        return None
+    return next((child for child in content.children if _is_see_also_type(child)), None)
+
+
+def _find_external_see_also(
+    parent: nodes.Element, start: int, end: int, heading: nodes.Node
+) -> nodes.Node | None:
     """Find a "See Also" part sited outside the normal ``[start, end)`` span.
 
     numpydoc's own "See Also" field is canonically reordered to sit before
-    "Examples".
+    "Examples", as a sibling under ``parent``. If "Examples" was written as
+    a real RST heading and hoisted out of its own ``desc_content`` to page
+    level (see ``_enclosing_descs``), "See Also" -- not a ``nodes.section``,
+    so untouched by that hoisting -- stays behind there instead, in the
+    ``desc_content`` of the one ``desc`` that used to contain this heading.
+    Only that nearest enclosing ``desc`` is checked -- not every one
+    ``_enclosing_descs`` yields -- or a page listing several documented
+    objects in a row would leak one object's "See Also" onto another's.
     """
     for i, child in enumerate(parent.children):
         if start <= i < end:
             continue
-        if type(child) in _ADMONITION_LABELS and _ADMONITION_LABELS[type(child)] == 'SEE ALSO':
+        if _is_see_also_type(child):
             return child
+    desc = next(_enclosing_descs(heading), None)
+    if desc is not None:
+        return _see_also_in_desc_content(desc)
     return None
 
 
@@ -589,28 +623,34 @@ def _desc_id(desc: addnodes.desc) -> str | None:
     return None
 
 
-def _qualified_name_for(node: nodes.Node, docname: str, counter: int) -> str:
-    """Best-effort identifier used to name the generated file and its title header."""
+def _enclosing_descs(node: nodes.Node) -> Iterator[addnodes.desc]:
+    """Yield candidate ``desc`` nodes enclosing ``node``, closest first.
+
+    At each ancestor level: the ancestor itself if it's a ``desc``, then
+    the nearest preceding sibling ``desc`` under the same parent (an
+    "Examples"/"See Also" section written as a real RST heading, not a
+    bare ``.. rubric::``, ends up as a sibling of the object's own
+    ``desc`` node rather than nested under it).
+    """
     ancestor: nodes.Node | None = node.parent
     while ancestor is not None:
         if isinstance(ancestor, addnodes.desc):
-            desc_id = _desc_id(ancestor)
-            if desc_id is not None:
-                return desc_id
+            yield ancestor
         parent = ancestor.parent
         if parent is not None:
-            # An "Examples" section written as a real RST heading (not a
-            # bare ``.. rubric::``) ends up as a sibling of the object's own
-            # ``desc`` node, not nested under it. Look for the nearest
-            # ``desc`` immediately preceding it under that shared parent,
-            # closest first.
             index = parent.index(ancestor)
             for sibling in reversed(parent.children[:index]):
                 if isinstance(sibling, addnodes.desc):
-                    desc_id = _desc_id(sibling)
-                    if desc_id is not None:
-                        return desc_id
+                    yield sibling
         ancestor = parent
+
+
+def _qualified_name_for(node: nodes.Node, docname: str, counter: int) -> str:
+    """Best-effort identifier used to name the generated file and its title header."""
+    for desc in _enclosing_descs(node):
+        desc_id = _desc_id(desc)
+        if desc_id is not None:
+            return desc_id
     base = Path(docname).name or docname
     return f'{base}-example-{counter}'
 
@@ -805,6 +845,8 @@ def _build_segments(nodes_in_span: list[nodes.Node], ctx: _RenderContext) -> lis
     segments: list[Segment] = []
     for i, node in enumerate(nodes_in_span):
         if isinstance(node, nodes.rubric) and _is_see_also_heading(node):
+            if not ctx.show_see_also:
+                break
             inner_ctx = replace(ctx, in_see_also=True)
             inner: list[Segment] = [('text', ['# SEE ALSO:'])]
             for later_node in nodes_in_span[i + 1 :]:
@@ -825,6 +867,7 @@ def _build_download_entries(
     formats: list[str],
     footer: str | None,
     link_labels: dict[str, str],
+    include_see_also: bool,
 ) -> list[tuple[str, str]]:
     """Convert a span of nodes into written ``.py``/``.ipynb`` files, per ``formats``.
 
@@ -837,7 +880,7 @@ def _build_download_entries(
     file's own header is the one heading every generated file has exactly
     one of (see ``_title_underline_segment``).
     """
-    py_ctx = _RenderContext(app=app, docname=docname, fmt='py')
+    py_ctx = _RenderContext(app=app, docname=docname, fmt='py', show_see_also=include_see_also)
     py_segments = _build_segments(nodes_in_span, py_ctx)
 
     if not any(kind == 'code' for kind, _lines in py_segments):
@@ -858,7 +901,9 @@ def _build_download_entries(
         if fmt == 'py':
             rel_path = _write_source(app, name, source)
         else:
-            ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
+            ipynb_ctx = _RenderContext(
+                app=app, docname=docname, fmt='ipynb', show_see_also=include_see_also
+            )
             ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
             ipynb_header = _title_underline_segment(header_title, 1, 'ipynb')
             # Converted separately from the footer and concatenated, rather
@@ -884,16 +929,26 @@ def _process_span(
     formats: list[str],
     footer: str | None,
     link_labels: dict[str, str],
+    include_see_also: bool,
 ) -> None:
     """Convert one Examples span and insert download link(s) if it has real code."""
     nodes_in_span = list(parent.children[start:end])
-    external_see_also = _find_external_see_also(parent, start, end)
-    if external_see_also is not None:
-        nodes_in_span.append(external_see_also)
+    if include_see_also:
+        external_see_also = _find_external_see_also(parent, start, end, heading)
+        if external_see_also is not None:
+            nodes_in_span.append(external_see_also)
 
     name = _qualified_name_for(heading, docname, counter)
     entries = _build_download_entries(
-        app, docname, name, _header_title(name), nodes_in_span, formats, footer, link_labels
+        app,
+        docname,
+        name,
+        _header_title(name),
+        nodes_in_span,
+        formats,
+        footer,
+        link_labels,
+        include_see_also,
     )
     if not entries:
         return
@@ -974,6 +1029,7 @@ def _process_gallery_page(
     formats: list[str],
     footer: str | None,
     link_labels: dict[str, str],
+    include_see_also: bool,
 ) -> None:
     """Replace a sphinx-gallery page's own download footer with converted downloads.
 
@@ -1008,7 +1064,15 @@ def _process_gallery_page(
     # has no title of its own.
     header_title = title if title else _header_title(name)
     entries = _build_download_entries(
-        app, docname, name, header_title, nodes_in_span, formats, footer, link_labels
+        app,
+        docname,
+        name,
+        header_title,
+        nodes_in_span,
+        formats,
+        footer,
+        link_labels,
+        include_see_also,
     )
     if not entries:
         return
@@ -1034,9 +1098,12 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
     formats = conf['formats']
     footer = conf['footer']
     link_labels = conf['link_labels']
+    include_see_also = conf['include_see_also']
 
     if conf['gallery_downloads']:
-        _process_gallery_page(app, docname, doctree, position, formats, footer, link_labels)
+        _process_gallery_page(
+            app, docname, doctree, position, formats, footer, link_labels, include_see_also
+        )
 
     # Process spans per shared parent, last to first.
     spans = _examples_spans(doctree)
@@ -1056,6 +1123,7 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
             formats,
             footer,
             link_labels,
+            include_see_also,
         )
 
 
@@ -1073,6 +1141,7 @@ _CONF_DEFAULTS: dict[str, object] = {
     'gallery_downloads': False,
     'footer': _DEFAULT_FOOTER,
     'link_labels': _DEFAULT_LINK_LABELS,
+    'include_see_also': True,
 }
 
 
@@ -1090,14 +1159,12 @@ def _coerce_conf_value(key: str, value: object) -> object:
         return value
     if key == 'formats':
         return value.split(',')
-    if key == 'gallery_downloads':
+    if key in ('gallery_downloads', 'include_see_also'):
         if value == '0':
             return False
         if value == '1':
             return True
-        msg = (
-            f"sphinx_examples_as_code_conf['gallery_downloads'] must be '0' or '1', got {value!r}."
-        )
+        msg = f"sphinx_examples_as_code_conf[{key!r}] must be '0' or '1', got {value!r}."
         raise ConfigError(msg)
     return value  # link_position, footer: a string is already the real type
 

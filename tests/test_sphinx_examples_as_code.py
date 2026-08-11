@@ -34,13 +34,19 @@ def _ctx(
     in_footer: bool = False,
     base_url: str | None = None,
     docname: str = 'page',
+    show_see_also: bool = True,
 ):
     """Build a minimal ``_RenderContext`` with a mocked Sphinx app."""
     app = Mock()
     app.config.html_baseurl = base_url
     app.builder.get_target_uri.side_effect = lambda d: f'{d}.html'
     return seac._RenderContext(
-        app=app, docname=docname, fmt=fmt, in_see_also=in_see_also, in_footer=in_footer
+        app=app,
+        docname=docname,
+        fmt=fmt,
+        in_see_also=in_see_also,
+        in_footer=in_footer,
+        show_see_also=show_see_also,
     )
 
 
@@ -663,6 +669,18 @@ def test_convert_node_see_also_section_treated_like_admonition():
     assert seac._convert_node(see_also_section, _ctx()) == [('directive', ['# SEE ALSO:', 'x = 1'])]
 
 
+def test_convert_node_seealso_dropped_when_show_see_also_false():
+    node = addnodes.seealso()
+    node += nodes.paragraph('', 'See X')
+    assert seac._convert_node(node, _ctx(show_see_also=False)) == []
+
+
+def test_convert_node_see_also_section_dropped_when_show_see_also_false():
+    doctree = _parse('Intro\n-----\n\nintro\n\nSee Also\n--------\n\n>>> x = 1')
+    see_also_section = doctree[1]
+    assert seac._convert_node(see_also_section, _ctx(show_see_also=False)) == []
+
+
 def test_convert_node_generic_admonition_uses_title():
     doctree = _parse('.. admonition:: Custom Title\n\n   body text')
     assert seac._convert_node(doctree[0], _ctx(fmt='py')) == [
@@ -830,14 +848,111 @@ def test_find_external_see_also_found_before_span():
 
     start = 2  # right after the rubric, now at index 1
     end = seac._span_from(doctree, start)
-    found = seac._find_external_see_also(doctree, start, end)
+    heading = doctree[1]
+    found = seac._find_external_see_also(doctree, start, end, heading)
     assert found is seealso_node
 
 
 def test_find_external_see_also_returns_none_when_absent():
     doctree = _parse('.. rubric:: Examples\n\ntext')
-    found = seac._find_external_see_also(doctree, 1, len(doctree.children))
+    heading = doctree[0]
+    found = seac._find_external_see_also(doctree, 1, len(doctree.children), heading)
     assert found is None
+
+
+def test_is_see_also_type_true_for_seealso_admonition():
+    assert seac._is_see_also_type(addnodes.seealso())
+
+
+def test_is_see_also_type_false_for_other_admonition():
+    assert not seac._is_see_also_type(nodes.note())
+
+
+def test_see_also_in_desc_content_found():
+    desc = addnodes.desc()
+    content = addnodes.desc_content()
+    seealso_node = addnodes.seealso()
+    content += seealso_node
+    desc += content
+    assert seac._see_also_in_desc_content(desc) is seealso_node
+
+
+def test_see_also_in_desc_content_no_desc_content():
+    assert seac._see_also_in_desc_content(addnodes.desc()) is None
+
+
+def test_see_also_in_desc_content_no_see_also_present():
+    desc = addnodes.desc()
+    content = addnodes.desc_content()
+    content += nodes.paragraph('', 'just prose')
+    desc += content
+    assert seac._see_also_in_desc_content(desc) is None
+
+
+def _hoisted_examples_fixture(*, with_see_also: bool = True):
+    """Build a ``desc``/hoisted-"Examples"-section pair mirroring pyvista's real docs setup.
+
+    numpydoc's own "See Also" field stays behind in the ``desc``'s own
+    ``desc_content`` -- unlike "Examples", it's never a ``nodes.section``,
+    so nothing hoists it out to page level alongside "Examples" (see
+    ``tests/single_function_fixture/conf.py``).
+    """
+    page_section = nodes.section()
+    page_section += nodes.title('', 'download_bunny')
+    desc = addnodes.desc()
+    desc += addnodes.desc_signature(ids=['pyvista.examples.downloads.download_bunny'])
+    content = addnodes.desc_content()
+    if with_see_also:
+        seealso_node = addnodes.seealso()
+        seealso_node += nodes.paragraph('', 'related dataset')
+        content += seealso_node
+    desc += content
+    page_section += desc
+    examples_section = nodes.section()
+    heading = nodes.title('', 'Examples')
+    examples_section += heading
+    page_section += examples_section
+    return examples_section, heading, (content[0] if with_see_also else None)
+
+
+def test_find_external_see_also_finds_hoisted_desc_content_see_also():
+    examples_section, heading, seealso_node = _hoisted_examples_fixture()
+    start = examples_section.index(heading) + 1
+    end = seac._span_from(examples_section, start)
+    found = seac._find_external_see_also(examples_section, start, end, heading)
+    assert found is seealso_node
+
+
+def test_find_external_see_also_hoisted_no_see_also_present():
+    examples_section, heading, _seealso_node = _hoisted_examples_fixture(with_see_also=False)
+    start = examples_section.index(heading) + 1
+    end = seac._span_from(examples_section, start)
+    assert seac._find_external_see_also(examples_section, start, end, heading) is None
+
+
+def test_find_external_see_also_does_not_leak_across_sibling_desc_nodes():
+    # a page listing several documented objects in a row: an earlier
+    # object's own "See Also" must not leak onto a later, unrelated one
+    body = nodes.section()
+    earlier_desc = addnodes.desc()
+    earlier_desc += addnodes.desc_signature(ids=['pkg.mod.earlier'])
+    earlier_content = addnodes.desc_content()
+    earlier_content += addnodes.seealso()
+    earlier_desc += earlier_content
+    body += earlier_desc
+
+    later_desc = addnodes.desc()
+    later_desc += addnodes.desc_signature(ids=['pkg.mod.later'])
+    later_content = addnodes.desc_content()
+    heading = nodes.rubric('', 'Examples')
+    later_content += heading
+    later_content += nodes.paragraph('', 'text')
+    later_desc += later_content
+    body += later_desc
+
+    start = later_content.index(heading) + 1
+    end = seac._span_from(later_content, start)
+    assert seac._find_external_see_also(later_content, start, end, heading) is None
 
 
 def test_span_from_runs_to_end_of_parent():
@@ -1413,6 +1528,15 @@ def test_build_segments_bare_rubric_see_also_affects_only_what_follows():
     ]
 
 
+def test_build_segments_bare_rubric_dropped_when_show_see_also_false():
+    _doctree, parent, start, end, _heading = _build_examples_doctree(
+        '.. rubric:: Examples\n\n>>> x = 1\n\n.. rubric:: See Also\n\n>>> y = 2'
+    )
+    nodes_in_span = list(parent.children[start:end])
+    segments = seac._build_segments(nodes_in_span, _ctx(show_see_also=False))
+    assert segments == [('code', ['x = 1'])]
+
+
 def test_process_span_no_code_no_download(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     _doctree, parent, start, end, heading = _build_examples_doctree(
@@ -1431,6 +1555,7 @@ def test_process_span_no_code_no_download(tmp_path: Path):
         ['py', 'ipynb'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
     assert len(parent.children) == original_len
 
@@ -1455,6 +1580,7 @@ def test_process_span_code_segment_but_not_real_code(tmp_path: Path):
         ['py', 'ipynb'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
     assert len(parent.children) == original_len
 
@@ -1476,6 +1602,7 @@ def test_process_span_inserts_at_bottom(tmp_path: Path):
         ['py', 'ipynb'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
     assert isinstance(parent.children[end], nodes.paragraph)
 
@@ -1497,6 +1624,7 @@ def test_process_span_inserts_at_top(tmp_path: Path):
         ['py', 'ipynb'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
     assert isinstance(parent.children[start], nodes.paragraph)
 
@@ -1527,12 +1655,46 @@ def test_process_span_includes_external_see_also(tmp_path: Path):
         ['py'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
     content = written.read_text()
     assert '# SEE ALSO:' in content
     assert '#     related info' in content
+
+
+def test_process_span_excludes_external_see_also_when_disabled(tmp_path: Path):
+    app = Mock(outdir=str(tmp_path))
+    doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
+    seealso_node = addnodes.seealso()
+    seealso_node += nodes.paragraph('', 'related info')
+    doctree.insert(0, seealso_node)
+
+    heading = doctree[1]
+    parent = heading.parent
+    start = parent.index(heading) + 1
+    end = seac._span_from(parent, start)
+
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+        False,
+    )
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    content = written.read_text()
+    assert '# SEE ALSO:' not in content
+    assert 'related info' not in content
 
 
 def test_process_span_appends_footer_with_blank_line_before(tmp_path: Path):
@@ -1552,6 +1714,7 @@ def test_process_span_appends_footer_with_blank_line_before(tmp_path: Path):
         ['py'],
         'Generated footer text.',
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -1578,6 +1741,7 @@ def test_process_span_no_footer_configured_omits_it(tmp_path: Path):
         ['py'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -1601,6 +1765,7 @@ def test_process_span_footer_in_notebook_is_linkified(tmp_path: Path):
         ['ipynb'],
         'Report to https://example.com/issues',
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.ipynb'))
@@ -1639,6 +1804,7 @@ def test_process_span_respects_formats_config(
         formats,
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     if not expected_extensions:
@@ -1661,7 +1827,18 @@ def test_process_span_custom_link_labels_used_in_download_node(tmp_path: Path):
     )
     custom_labels = {'py': 'Get the script', 'ipynb': 'Get the notebook'}
     seac._process_span(
-        app, 'page', parent, start, end, heading, 1, 'bottom', ['py', 'ipynb'], None, custom_labels
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'bottom',
+        ['py', 'ipynb'],
+        None,
+        custom_labels,
+        True,
     )
 
     text = parent.children[end].astext()
@@ -1692,6 +1869,7 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'include_see_also': True,
     }
 
     doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
@@ -1940,7 +2118,7 @@ def test_process_gallery_page_not_a_gallery_page_is_a_no_op(tmp_path: Path):
     doctree = _parse('Some ordinary page\n\nwith a paragraph.')
     original = doctree.pformat()
     seac._process_gallery_page(
-        app, 'page', doctree, 'bottom', ['py', 'ipynb'], None, seac._DEFAULT_LINK_LABELS
+        app, 'page', doctree, 'bottom', ['py', 'ipynb'], None, seac._DEFAULT_LINK_LABELS, True
     )
     assert doctree.pformat() == original
 
@@ -1958,6 +2136,7 @@ def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
         ['py'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -1978,6 +2157,7 @@ def test_process_gallery_page_no_title_falls_back_to_examples_from_header(tmp_pa
         ['py'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -1995,6 +2175,7 @@ def test_process_gallery_page_strips_furniture_and_inserts_download(tmp_path: Pa
         ['py'],
         None,
         seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     assert not any(seac._has_class(n, seac._GALLERY_FOOTER_CLASS) for n in doctree.findall())
@@ -2028,7 +2209,14 @@ def test_process_gallery_page_includes_code_from_sibling_sections(tmp_path: Path
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree_with_sibling_sections()
     seac._process_gallery_page(
-        app, 'auto_examples/plot_multi', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+        app,
+        'auto_examples/plot_multi',
+        doctree,
+        'bottom',
+        ['py'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -2042,7 +2230,7 @@ def test_process_gallery_page_respects_top_position(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree()
     seac._process_gallery_page(
-        app, 'plot_minimal', doctree, 'top', ['py'], None, seac._DEFAULT_LINK_LABELS
+        app, 'plot_minimal', doctree, 'top', ['py'], None, seac._DEFAULT_LINK_LABELS, True
     )
 
     section = next(doctree.findall(nodes.section))
@@ -2055,7 +2243,14 @@ def test_process_gallery_page_no_real_code_strips_furniture_but_no_download(tmp_
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree(with_code=False)
     seac._process_gallery_page(
-        app, 'plot_minimal', doctree, 'bottom', ['py', 'ipynb'], None, seac._DEFAULT_LINK_LABELS
+        app,
+        'plot_minimal',
+        doctree,
+        'bottom',
+        ['py', 'ipynb'],
+        None,
+        seac._DEFAULT_LINK_LABELS,
+        True,
     )
 
     assert not any(seac._has_class(n, seac._GALLERY_FOOTER_CLASS) for n in doctree.findall())
@@ -2069,7 +2264,7 @@ def test_process_gallery_page_empty_after_stripping_is_a_no_op(tmp_path: Path):
     doctree = _parse('')
     doctree += _gallery_footer()
     seac._process_gallery_page(
-        app, 'page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+        app, 'page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS, True
     )
     assert not any(isinstance(n, addnodes.download_reference) for n in doctree.findall())
 
@@ -2084,7 +2279,7 @@ def test_process_gallery_page_no_wrapping_section_still_works(tmp_path: Path):
     doctree += _gallery_footer()
 
     seac._process_gallery_page(
-        app, 'weird_page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+        app, 'weird_page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS, True
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -2100,6 +2295,7 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'include_see_also': True,
     }
 
     doctree = _build_gallery_doctree()
@@ -2119,6 +2315,7 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
         'gallery_downloads': True,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'include_see_also': True,
     }
 
     doctree = _build_gallery_doctree()
@@ -2203,6 +2400,16 @@ def test_coerce_conf_value_gallery_downloads_invalid_string_raises():
         seac._coerce_conf_value('gallery_downloads', 'yes')
 
 
+@pytest.mark.parametrize(('raw', 'expected'), [('0', False), ('1', True)])
+def test_coerce_conf_value_include_see_also_bool_strings(raw: str, expected: bool):
+    assert seac._coerce_conf_value('include_see_also', raw) is expected
+
+
+def test_coerce_conf_value_include_see_also_invalid_string_raises():
+    with pytest.raises(ConfigError, match="must be '0' or '1'"):
+        seac._coerce_conf_value('include_see_also', 'yes')
+
+
 def test_coerce_conf_value_link_position_string_passes_through():
     assert seac._coerce_conf_value('link_position', 'bottom') == 'bottom'
 
@@ -2226,6 +2433,7 @@ def test_finalize_conf_partial_dict_keeps_the_rest_default():
     assert conf['formats'] == ['py', 'ipynb']
     assert conf['gallery_downloads'] is False
     assert conf['footer'] == seac._DEFAULT_FOOTER
+    assert conf['include_see_also'] is True
 
 
 def test_finalize_conf_default_footer_text():

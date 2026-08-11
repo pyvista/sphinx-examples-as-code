@@ -6,6 +6,10 @@ from __future__ import annotations
 def download_bunny():
     """Download bunny dataset.
 
+    See Also
+    --------
+    mymodule.download_bunny : Download bunny dataset.
+
     Examples
     --------
     >>> import sys
