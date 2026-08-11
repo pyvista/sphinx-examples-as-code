@@ -39,6 +39,7 @@ sphinx_examples_as_code_conf = {
         'py': 'Download Python source code',
         'ipynb': 'Download Jupyter notebook',
     },
+    'include_see_also': True,
 }
 ```
 
@@ -48,6 +49,13 @@ sphinx_examples_as_code_conf = {
   (default). Always offered in that order regardless of how the list is written.
 - `link_labels`: the text of the download link(s) themselves, per format. Set only the
   format(s) you want to change; any left unset keep reading their own default shown above.
+- `include_see_also`: whether "See Also" content is included in the generated file.
+  `True` (default) includes it, in any of its forms: a `.. seealso::` admonition, a bare
+  `.. rubric:: See Also`, a hand-written `See Also` heading, or numpydoc's own "See Also"
+  field (including when it's been reordered outside the Examples section itself, or the
+  Examples section has been hoisted to a heading of its own — a setup some projects use to
+  get "Examples" listed in the page's own navigation). `False` excludes "See Also" content
+  in every one of those forms.
 - `gallery_downloads`: opt-in takeover of
   [sphinx-gallery](https://sphinx-gallery.github.io)'s own per-example downloads.
   `False` (default) leaves sphinx-gallery pages untouched. See

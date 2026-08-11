@@ -579,6 +579,41 @@ def test_base_url_set_resolves_links(tmp_path: Path):
         assert '[`docstring_cases.Sample`](https://docs.example.com/' in nb_text
 
 
+# ---------------------------------------------------------------------------
+# include_see_also
+# ---------------------------------------------------------------------------
+
+
+def test_include_see_also_disabled_drops_every_form(tmp_path: Path):
+    """Every "See Also" form -- admonition, bare rubric, nested section -- is dropped."""
+    html_dir = tmp_path / 'html'
+    doctree_dir = tmp_path / 'doctrees'
+    returncode, out, err = _run_sphinx_build(
+        _sphinx_build_cmd(
+            SRCDIR,
+            html_dir,
+            doctree_dir,
+            ('-D', 'sphinx_examples_as_code_conf.include_see_also=0'),
+        ),
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+
+    py_files = list((html_dir / '_downloads').rglob('*.py'))
+
+    seealso_src = _read(py_files, 'case_seealso.py')
+    assert '# SEE ALSO:' not in seealso_src
+    assert 'Some Target' not in seealso_src
+
+    for name in (
+        'case_see_also_directive_for_base_url',
+        'case_see_also_bare_rubric_for_base_url',
+        'case_see_also_underline_heading_for_base_url',
+    ):
+        src = _read(py_files, name)
+        assert '# SEE ALSO:' not in src
+        assert 'docstring_cases.Sample' not in src
+
+
 def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
     """Adjacent lines within one markdown cell need an explicit hard break.
 
