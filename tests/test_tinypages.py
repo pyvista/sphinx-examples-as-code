@@ -262,7 +262,7 @@ def test_whitespace_conventions(built: tuple[Path, list[Path]]):
     """Check the spacing rules.
 
     text-directly-above-code, blank-after-code, directives get blank lines on both sides,
-    and the file ends with a trailing blank line.
+    and the file ends with exactly one trailing newline, no blank line.
     """
     # case_combined: prose -> note (directive) -> code -> dropdown (dropped)
     combined_src = _read(built[1], 'case_combined')
@@ -278,17 +278,19 @@ def test_whitespace_conventions(built: tuple[Path, list[Path]]):
     )
     assert lines[note_end - 1] == ''  # blank line right after the note, before code
 
-    # a code block is always followed by a blank line
+    # a code block is always followed by a blank line -- unless it's the
+    # last thing in the file, with nothing left to separate it from
     code_idx = next(i for i, line in enumerate(lines) if line == 'import sys')
     # find where this run of code ends
     end_of_code = code_idx
     while end_of_code + 1 < len(lines) and lines[end_of_code + 1].strip():
         end_of_code += 1
-    assert lines[end_of_code + 1] == ''
+    if end_of_code + 1 < len(lines):
+        assert lines[end_of_code + 1] == ''
 
-    # file ends with exactly one trailing blank line
-    assert combined_src.endswith('\n\n')
-    assert not combined_src.endswith('\n\n\n')
+    # file ends with exactly one trailing newline, no blank line
+    assert combined_src.endswith('\n')
+    assert not combined_src.endswith('\n\n')
 
     # case_xref_plain: prose sits directly above its doctest code, no blank
     # line in between, since the source docstring has none either
