@@ -567,9 +567,6 @@ def test_list_segment_enumerated_list_numbers_each_item():
 
 
 def test_list_segment_is_directive_kind_for_blank_lines_both_sides():
-    # a real CommonMark parse confirms a '-'/'1.' line directly following
-    # other text with no blank line before it doesn't start a list at all
-    # -- it reads as more of the same paragraph, marker included
     blist = _bullet_list('Only item')
     kind, _lines = seac._convert_node(blist, _ctx())[0]
     assert kind == 'directive'
@@ -588,8 +585,6 @@ def test_list_segment_empty_item_skipped():
 
 
 def test_list_segment_non_list_item_child_skipped():
-    # defensive: docutils only ever puts list_item children in a
-    # bullet/enumerated list, but a hand-built tree could have anything
     blist = _bullet_list('Real item')
     blist += nodes.comment()
     assert seac._convert_node(blist, _ctx()) == [('directive', ['# - Real item'])]
@@ -1133,26 +1128,19 @@ _FOOTER_SEP_LINE = f'# {seac._FOOTER_SEPARATOR}'
 
 
 def test_footer_segment_starts_with_the_separator():
-    # marks the footer as trailing boilerplate, distinct from the example's
-    # own comments -- and (dashes specifically) renders as a real <hr> in
-    # .ipynb, confirmed against an actual CommonMark parser, not assumed
     segments = seac._footer_segment('Generated file.', 'py', _footer_app(), 'page')
     assert segments[0][1][0] == _FOOTER_SEP_LINE
 
 
 def test_footer_segment_plain_text_single_line():
-    # no RST markup at all -- the common case for a custom footer -- behaves
-    # exactly as it always has otherwise: one comment line after the separator
+    # no RST markup at all -- the common case for a custom footer
     segments = seac._footer_segment('Generated file.', 'py', _footer_app(), 'page')
     assert segments == [('directive', [_FOOTER_SEP_LINE, '# Generated file.'])]
 
 
 def test_footer_segment_plain_text_multiline_becomes_one_comment_per_line():
     # a single newline (no blank line) stays one RST paragraph, with the
-    # line break preserved in its text -- verified against a real docutils
-    # parse, not assumed: publish_doctree('line one\nline two') keeps them
-    # as one <paragraph> whose text is 'line one\nline two', not folded
-    # into 'line one line two'
+    # line break preserved in its text
     segments = seac._footer_segment('line one\nline two', 'py', _footer_app(), 'page')
     kind, lines = segments[0]
     assert kind == 'directive'
@@ -1873,11 +1861,10 @@ def _gallery_subsection(title: str, code: str) -> nodes.section:
 def _build_gallery_doctree_with_sibling_sections() -> nodes.document:
     """Build a doctree shaped like a real multi-``# %%``-cell gallery page.
 
-    The regression case: each ``# %%`` cell with its own heading becomes a
-    *sibling* section at the document level (confirmed against a real
-    sphinx-gallery build), not nested inside the page's outer section --
-    this is what _gallery_body/_process_gallery_page must span across
-    rather than just the first section's children.
+    Each ``# %%`` cell with its own heading becomes a *sibling* section at
+    the document level, not nested inside the page's outer section --
+    what _gallery_body/_process_gallery_page must span across, rather than
+    just the first section's children.
     """
     doctree = _parse('')
     doctree += _gallery_note()

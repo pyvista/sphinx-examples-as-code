@@ -81,16 +81,13 @@ What happens to the content of an Examples section:
   comments, set off with blank lines on both sides like any other directive.
 - Admonitions (`.. note::`, `.. warning::`, `.. seealso::`, ...) become a `# LABEL:`
   comment followed by their content as comments, indented one level under the label in
-  `.py` (not `.ipynb`, where leading whitespace within a paragraph has no visible effect
-  once rendered). "See Also" is recognized in any of its three forms (`.. seealso::`, a
-  bare `.. rubric:: See Also`, or a hand-written `See Also` heading) and always renders
-  the same way.
+  `.py` only. "See Also" is recognized in any of its three forms (`.. seealso::`, a bare
+  `.. rubric:: See Also`, or a hand-written `See Also` heading) and always renders the
+  same way.
 - A bullet/numbered list becomes a `-`/`N.`-marked line per item, set off with a blank
-  line on both sides in either format -- required for `.ipynb` to render it as a real
-  list rather than plain text (confirmed against a real CommonMark parse: a list can't
-  interrupt a paragraph it's directly attached to with no blank line). A definition
-  list's term stays at the surrounding indent; its definition (the body nested under it)
-  is indented one level further in `.py`, same as an admonition's own content.
+  line on both sides in either format. A definition list's term stays at the surrounding
+  indent; its definition (the body nested under it) is indented one level further in
+  `.py`, same as an admonition's own content.
 - Cross-references and inline code (`:class:`, `:meth:`, `:func:`, `:attr:`,
   double-backtick literals, ...) keep their display text, wrapped in backticks (e.g.
   ``:class:`pyvista.Plotter` `` -> `` `pyvista.Plotter` ``). If `html_baseurl` is set and
@@ -148,8 +145,7 @@ styles:
 - `.py` uses an RST-style title + underline, one character per level -- the same
   sequence Sphinx's own documentation uses for sections through sub-paragraphs: `=`, `-`,
   `~`, `^`, `"`, `'` for levels 1 through 6.
-- `.ipynb` always uses ATX syntax (`#`, `##`, `###`, ...), since that's a real Markdown
-  heading at any level, whereas an underline only reads as one for the first two.
+- `.ipynb` always uses ATX syntax (`#`, `##`, `###`, ...) at every level.
 
 Two things worth knowing before turning this on:
 

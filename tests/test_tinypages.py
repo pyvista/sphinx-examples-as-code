@@ -331,9 +331,7 @@ def test_seealso_structured_py(built: tuple[Path, list[Path]]):
 
     intro_idx = lines.index('#     This dataset is used in the following examples:')
     # the bullet list is set off with a blank line before it, each item
-    # '- '-marked, back at the base (non-definition) indent level -- no
-    # blank line asserted after: the built fixture disables the footer, so
-    # the list is the last thing in the file (nothing to separate it from)
+    # '- '-marked, back at the base (non-definition) indent level
     assert lines[intro_idx + 1] == ''
     assert lines[intro_idx + 2] == '#     - Some Target'
     assert lines[intro_idx + 3] == '#     - Some Target'
@@ -697,18 +695,12 @@ def test_default_footer_appears_in_ipynb_with_clickable_links(tmp_path: Path):
 def test_default_footer_is_its_own_dedicated_ipynb_cell(tmp_path: Path):
     """The footer always gets its own markdown cell, never sharing one.
 
-    ``case_note``'s Examples section ends with a ``.. note::`` -- markdown
-    content directly preceding the footer, with no code in between -- which
-    would otherwise land in the same cell (``_segments_to_cells`` only splits
-    on code/markdown transitions). Confirms it's split out anyway; see
-    ``test_gallery_downloads.py`` for the case where the footer already
-    follows a code cell, so it would land in its own cell either way.
+    ``case_note``'s Examples section ends with a ``.. note::``, markdown
+    content directly preceding the footer with no code in between; see
+    ``test_gallery_downloads.py`` for the case where the footer follows a
+    code cell instead.
 
-    Also confirms the separator renders as a real ``<hr>``, not more text:
-    confirmed against an actual CommonMark parser (Python-Markdown) during
-    development, not just assumed from the spec -- a lone line of 3+ dashes,
-    preceded by a blank line, is a thematic break ('=' would not be, only
-    valid for setext heading underlines, not thematic breaks).
+    Also confirms the separator renders as a real ``<hr>``, not more text.
     """
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'

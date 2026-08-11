@@ -1,22 +1,19 @@
 """Sphinx config reproducing a real-world numpydoc section-hoisting setup.
 
 numpydoc renders docstring sections (Notes, Examples, ...) as
-``.. rubric::`` by default, which never becomes a real docutils section --
-so ``_qualified_name_for``'s plain ancestor walk (desc_content -> desc)
-always finds the object's own ``desc`` node directly, no special handling
-needed. Some projects (pyvista's real docs included -- see its
-``doc/source/conf.py``) override this to get real headings for the page's
-"on this page" navbar, then hoist those sections out of the autodoc
-``desc`` node to page level so Sphinx's TocTreeCollector can see them. That
-lands "Examples" as a *sibling* of the object's own ``desc``, not an
-ancestor of its own heading -- the exact structure that produced a
-nonsensical ``<docname>-example-1`` header in production for a page that
-unambiguously documents one function.
+``.. rubric::`` by default, not a real docutils section. Some projects
+(pyvista's real docs included -- see its ``doc/source/conf.py``) override
+this to get real headings for the page's "on this page" navbar, then hoist
+those sections out of the autodoc ``desc`` node to page level. That lands
+"Examples" as a *sibling* of the object's own ``desc``, not an ancestor of
+its own heading -- the structure that produced a nonsensical
+``<docname>-example-1`` header in production for a page documenting one
+function.
 
-Reproduced here (rather than in ``tinypages/conf.py``) since it changes
+Reproduced here rather than in ``tinypages/conf.py``: this changes
 docstring-section rendering globally for the build it's applied to, and
-``tinypages`` is shared by many other tests that already pin exact output
-for the un-hoisted (rubric-based) case.
+``tinypages`` is shared by many other tests pinning exact output for the
+un-hoisted (rubric-based) case.
 """
 
 from __future__ import annotations
