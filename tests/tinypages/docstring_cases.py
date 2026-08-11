@@ -303,6 +303,33 @@ def case_seealso():
     """
 
 
+def case_seealso_structured():
+    """Docstring with a seealso block shaped like pyvista's dataset downloaders.
+
+    A definition-list entry (a reference with an indented description
+    under it), a bare reference paragraph, an intro paragraph, and a
+    bullet list of references -- exactly the mix
+    ``pyvista.examples.downloads.download_bunny``'s own See Also uses.
+
+    Examples
+    --------
+    >>> import sys
+
+    .. seealso::
+
+        :ref:`Some Target <some-target>`
+            See this dataset in the gallery for more info.
+
+        :ref:`Some Target <some-target>`
+
+        This dataset is used in the following examples:
+
+        * :ref:`Some Target <some-target>`
+        * :ref:`Some Target <some-target>`
+
+    """
+
+
 def case_stray_hyperlink_in_doctest_comment():
     """Docstring with RST hyperlink syntax written inside a doctest comment.
 

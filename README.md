@@ -85,6 +85,12 @@ What happens to the content of an Examples section:
   once rendered). "See Also" is recognized in any of its three forms (`.. seealso::`, a
   bare `.. rubric:: See Also`, or a hand-written `See Also` heading) and always renders
   the same way.
+- A bullet/numbered list becomes a `-`/`N.`-marked line per item, set off with a blank
+  line on both sides in either format -- required for `.ipynb` to render it as a real
+  list rather than plain text (confirmed against a real CommonMark parse: a list can't
+  interrupt a paragraph it's directly attached to with no blank line). A definition
+  list's term stays at the surrounding indent; its definition (the body nested under it)
+  is indented one level further in `.py`, same as an admonition's own content.
 - Cross-references and inline code (`:class:`, `:meth:`, `:func:`, `:attr:`,
   double-backtick literals, ...) keep their display text, wrapped in backticks (e.g.
   ``:class:`pyvista.Plotter` `` -> `` `pyvista.Plotter` ``). If `html_baseurl` is set and

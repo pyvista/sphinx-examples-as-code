@@ -49,6 +49,8 @@ resolve to.
 
 .. autofunction:: docstring_cases.case_seealso
 
+.. autofunction:: docstring_cases.case_seealso_structured
+
 .. autofunction:: docstring_cases.case_stray_hyperlink_in_doctest_comment
 
 .. autofunction:: docstring_cases.case_stray_xref_in_doctest_comment

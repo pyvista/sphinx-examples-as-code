@@ -307,12 +307,53 @@ def test_seealso_admonition(built: tuple[Path, list[Path]]):
     Mirrors pyvista's dataset downloader docstrings, which follow their
     doctest with a ``.. seealso::`` linking to the Dataset Gallery.
     """
-    src = _read(built[1], 'case_seealso')
+    src = _read(built[1], 'case_seealso.py')
     assert '# SEE ALSO:' in src
     assert '#     Some Target' in src
     assert '#     See this in the gallery for more info.' in src
     # each paragraph must be its own line -- not concatenated together
     assert 'Some Target\n#     See' in src or 'Some TargetSee' not in src
+
+
+def test_seealso_structured_py(built: tuple[Path, list[Path]]):
+    """A definition's description is indented one level past its own term.
+
+    Mirrors ``pyvista.examples.downloads.download_bunny``'s own See Also:
+    a reference + indented description, a bare reference, an intro
+    paragraph, then a bullet list of references.
+    """
+    src = _read(built[1], 'case_seealso_structured')
+    lines = src.splitlines()
+
+    term_idx = lines.index('#     Some Target')
+    # the definition under it is indented one level further
+    assert lines[term_idx + 1] == '#         See this dataset in the gallery for more info.'
+
+    intro_idx = lines.index('#     This dataset is used in the following examples:')
+    # the bullet list is set off with a blank line before it, each item
+    # '- '-marked, back at the base (non-definition) indent level -- no
+    # blank line asserted after: the built fixture disables the footer, so
+    # the list is the last thing in the file (nothing to separate it from)
+    assert lines[intro_idx + 1] == ''
+    assert lines[intro_idx + 2] == '#     - Some Target'
+    assert lines[intro_idx + 3] == '#     - Some Target'
+
+
+def test_seealso_structured_ipynb_renders_a_real_list(built_notebooks: list[Path]):
+    """The bullet list renders as a real Markdown list, not more plain text."""
+    nb_path = next(
+        p for p in built_notebooks if p.stem == 'docstring_cases_case_seealso_structured'
+    )
+    notebook = json.loads(nb_path.read_text(encoding='utf-8'))
+    lines = [line.rstrip() for cell in notebook['cells'] for line in cell['source']]
+
+    term_idx = lines.index('Some Target')
+    assert lines[term_idx + 1] == 'See this dataset in the gallery for more info.'
+
+    intro_idx = lines.index('This dataset is used in the following examples:')
+    assert lines[intro_idx + 1] == ''
+    assert lines[intro_idx + 2] == '- Some Target'
+    assert lines[intro_idx + 3] == '- Some Target'
 
 
 def test_stray_markup_in_doctest_comment_cleaned(built: tuple[Path, list[Path]]):
