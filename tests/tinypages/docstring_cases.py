@@ -373,12 +373,10 @@ def case_regular_xref_for_base_url():
     """
 
 
-def case_see_also_directive_for_base_url():
+def case_see_also_directive():
     """Docstring with a ``.. seealso::`` directive containing a cross-reference.
 
-    With a base URL configured: both formats should resolve the link, but
-    the .py file should write it as literal ``name url`` text while the
-    .ipynb should render it as a real markdown link.
+    Always dropped entirely, cross-reference and all.
 
     Examples
     --------
@@ -391,7 +389,7 @@ def case_see_also_directive_for_base_url():
     """
 
 
-def case_see_also_bare_rubric_for_base_url():
+def case_see_also_bare_rubric():
     """Docstring with a bare ``.. rubric:: See Also`` heading (a flat sibling).
 
     Examples
@@ -405,7 +403,7 @@ def case_see_also_bare_rubric_for_base_url():
     """
 
 
-def case_see_also_underline_heading_for_base_url():
+def case_see_also_underline_heading():
     """Docstring with a hand-written ``See Also`` underline-style heading.
 
     Unlike the rubric form above, this nests as its own section rather

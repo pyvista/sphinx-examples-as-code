@@ -39,7 +39,6 @@ sphinx_examples_as_code_conf = {
         'py': 'Download Python source code',
         'ipynb': 'Download Jupyter notebook',
     },
-    'include_see_also': True,
 }
 ```
 
@@ -49,13 +48,6 @@ sphinx_examples_as_code_conf = {
   (default). Always offered in that order regardless of how the list is written.
 - `link_labels`: the text of the download link(s) themselves, per format. Set only the
   format(s) you want to change; any left unset keep reading their own default shown above.
-- `include_see_also`: whether "See Also" content is included in the generated file.
-  `True` (default) includes it, in any of its forms: a `.. seealso::` admonition, a bare
-  `.. rubric:: See Also`, a hand-written `See Also` heading, or numpydoc's own "See Also"
-  field (including when it's been reordered outside the Examples section itself, or the
-  Examples section has been hoisted to a heading of its own — a setup some projects use to
-  get "Examples" listed in the page's own navigation). `False` excludes "See Also" content
-  in every one of those forms.
 - `gallery_downloads`: opt-in takeover of
   [sphinx-gallery](https://sphinx-gallery.github.io)'s own per-example downloads.
   `False` (default) leaves sphinx-gallery pages untouched. See
@@ -87,11 +79,8 @@ What happens to the content of an Examples section:
   real Python source. Doctest *output* lines are dropped — only the input code matters.
 - `.. code-block:: python` (or `py`) blocks are kept as-is; other languages become
   comments, set off with blank lines on both sides like any other directive.
-- Admonitions (`.. note::`, `.. warning::`, `.. seealso::`, ...) become a `# LABEL:`
-  comment followed by their content as comments, indented one level under the label in
-  `.py` only. "See Also" is recognized in any of its three forms (`.. seealso::`, a bare
-  `.. rubric:: See Also`, or a hand-written `See Also` heading) and always renders the
-  same way.
+- Admonitions (`.. note::`, `.. warning::`, ...) become a `# LABEL:` comment followed by
+  their content as comments, indented one level under the label in `.py` only.
 - A bullet/numbered list becomes a `-`/`N.`-marked line per item, set off with a blank
   line on both sides in either format — a bare `#` instead of a real blank line when
   that falls inside an admonition or a definition's own body in `.py`, so the whole
@@ -101,15 +90,15 @@ What happens to the content of an Examples section:
 - Cross-references and inline code (`:class:`, `:meth:`, `:func:`, `:attr:`,
   double-backtick literals, ...) keep their display text, wrapped in backticks (e.g.
   ``:class:`pyvista.Plotter` `` -> `` `pyvista.Plotter` ``). If `html_baseurl` is set and
-  the reference resolves: `.ipynb` turns it into a clickable link everywhere; `.py` only
-  writes the link inside a "See Also" part (as `name url` on its own line) — everywhere
-  else in `.py` the link is simply omitted.
+  the reference resolves, `.ipynb` turns it into a clickable link; `.py` never writes the
+  link, only the display text.
 - Plain prose-style references (`:ref:`, `:doc:`) are treated the same way, minus the
   backticks.
 - Everything else text-bearing (prose, captions, other non-Python code) becomes a plain
   `#` comment.
 - Figures/images, raw HTML, sphinx-design dropdowns/tab-sets, and sphinx-tags' `.. tags::`
   line are dropped entirely.
+- "See Also" content is always dropped.
 
 Generated `.py` files start with a `# Examples from <qualified name>` title header
 (gallery mode uses the page's own title instead -- see below), with a few whitespace

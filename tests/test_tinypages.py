@@ -301,60 +301,6 @@ def test_whitespace_conventions(built: tuple[Path, list[Path]]):
     assert xref_lines[code_start - 1].startswith('#')
 
 
-def test_seealso_admonition(built: tuple[Path, list[Path]]):
-    """A ``.. seealso::`` block's separate paragraphs must not run together.
-
-    Mirrors pyvista's dataset downloader docstrings, which follow their
-    doctest with a ``.. seealso::`` linking to the Dataset Gallery.
-    """
-    src = _read(built[1], 'case_seealso.py')
-    assert '# SEE ALSO:' in src
-    assert '#     Some Target' in src
-    assert '#     See this in the gallery for more info.' in src
-    # each paragraph must be its own line -- not concatenated together
-    assert 'Some Target\n#     See' in src or 'Some TargetSee' not in src
-
-
-def test_seealso_structured_py(built: tuple[Path, list[Path]]):
-    """A definition's description is indented one level past its own term.
-
-    Mirrors ``pyvista.examples.downloads.download_bunny``'s own See Also:
-    a reference + indented description, a bare reference, an intro
-    paragraph, then a bullet list of references.
-    """
-    src = _read(built[1], 'case_seealso_structured')
-    lines = src.splitlines()
-
-    term_idx = lines.index('#     Some Target')
-    # the definition under it is indented one level further
-    assert lines[term_idx + 1] == '#         See this dataset in the gallery for more info.'
-
-    intro_idx = lines.index('#     This dataset is used in the following examples:')
-    # the bullet list is set off with a bare '#' before it (not a real blank
-    # line -- the whole SEE ALSO body stays one unbroken comment block),
-    # each item '- '-marked, back at the base (non-definition) indent level
-    assert lines[intro_idx + 1] == '#'
-    assert lines[intro_idx + 2] == '#     - Some Target'
-    assert lines[intro_idx + 3] == '#     - Some Target'
-
-
-def test_seealso_structured_ipynb_renders_a_real_list(built_notebooks: list[Path]):
-    """The bullet list renders as a real Markdown list, not more plain text."""
-    nb_path = next(
-        p for p in built_notebooks if p.stem == 'docstring_cases_case_seealso_structured'
-    )
-    notebook = json.loads(nb_path.read_text(encoding='utf-8'))
-    lines = [line.rstrip() for cell in notebook['cells'] for line in cell['source']]
-
-    term_idx = lines.index('Some Target')
-    assert lines[term_idx + 1] == 'See this dataset in the gallery for more info.'
-
-    intro_idx = lines.index('This dataset is used in the following examples:')
-    assert lines[intro_idx + 1] == ''
-    assert lines[intro_idx + 2] == '- Some Target'
-    assert lines[intro_idx + 3] == '- Some Target'
-
-
 def test_stray_markup_in_doctest_comment_cleaned(built: tuple[Path, list[Path]]):
     """RST written inside a doctest comment is never resolved by docutils.
 
@@ -503,7 +449,7 @@ def test_formats_config_selection(
 
 
 # ---------------------------------------------------------------------------
-# html_baseurl and See Also link resolution
+# html_baseurl link resolution
 # ---------------------------------------------------------------------------
 
 
@@ -511,26 +457,20 @@ def test_base_url_unset_no_links_anywhere(
     built: tuple[Path, list[Path]], built_notebooks: list[Path]
 ):
     """Default (``html_baseurl`` unset): no links anywhere, in either format."""
-    for name in (
-        'case_regular_xref_for_base_url',
-        'case_see_also_directive_for_base_url',
-        'case_see_also_bare_rubric_for_base_url',
-        'case_see_also_underline_heading_for_base_url',
-    ):
-        py_src = _read(built[1], name)
-        assert 'http' not in py_src
+    py_src = _read(built[1], 'case_regular_xref_for_base_url')
+    assert 'http' not in py_src
 
-        nb_path = next(p for p in built_notebooks if p.stem == f'docstring_cases_{name}')
-        nb_text = nb_path.read_text(encoding='utf-8')
-        assert 'http' not in nb_text
-        assert '](' not in nb_text  # no markdown links
+    nb_path = next(
+        p for p in built_notebooks if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
+    )
+    nb_text = nb_path.read_text(encoding='utf-8')
+    assert 'http' not in nb_text
+    assert '](' not in nb_text  # no markdown links
 
 
 def test_base_url_set_resolves_links(tmp_path: Path):
-    # With html_baseurl configured, See Also parts (in any form) get literal
-    # URL text in .py and clickable markdown links in .ipynb; regular refs
-    # only get the link in .ipynb, and .py stays link-free outside a See
-    # Also part.
+    # With html_baseurl configured, a regular ref only gets the link in
+    # .ipynb; .py stays link-free.
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(
@@ -554,7 +494,7 @@ def test_base_url_set_resolves_links(tmp_path: Path):
     py_files = list(downloads_dir.rglob('*.py'))
     ipynb_files = list(downloads_dir.rglob('*.ipynb'))
 
-    # a regular (non-See-Also) reference: link resolved in .ipynb, omitted in .py
+    # a regular reference: link resolved in .ipynb, omitted in .py
     regular_py = _read(py_files, 'case_regular_xref_for_base_url')
     assert 'http' not in regular_py
     assert '`docstring_cases.Sample`' in regular_py
@@ -564,53 +504,28 @@ def test_base_url_set_resolves_links(tmp_path: Path):
     ).read_text(encoding='utf-8')
     assert '[`docstring_cases.Sample`](https://docs.example.com/' in regular_nb
 
-    # all three See Also forms should behave identically
-    for name in (
-        'case_see_also_directive_for_base_url',
-        'case_see_also_bare_rubric_for_base_url',
-        'case_see_also_underline_heading_for_base_url',
-    ):
-        py_src = _read(py_files, name)
-        assert '# SEE ALSO:' in py_src
-        assert '#     docstring_cases.Sample https://docs.example.com/' in py_src
-        assert '`docstring_cases.Sample`' not in py_src  # no backticks in See Also url lines
-
-        nb_path = next(p for p in ipynb_files if p.stem == f'docstring_cases_{name}')
-        nb_text = nb_path.read_text(encoding='utf-8')
-        assert '[`docstring_cases.Sample`](https://docs.example.com/' in nb_text
-
 
 # ---------------------------------------------------------------------------
-# include_see_also
+# See Also is always dropped
 # ---------------------------------------------------------------------------
 
 
-def test_include_see_also_disabled_drops_every_form(tmp_path: Path):
+def test_see_also_always_dropped_in_every_form(built: tuple[Path, list[Path]]):
     """Every "See Also" form -- admonition, bare rubric, nested section -- is dropped."""
-    html_dir = tmp_path / 'html'
-    doctree_dir = tmp_path / 'doctrees'
-    returncode, out, err = _run_sphinx_build(
-        _sphinx_build_cmd(
-            SRCDIR,
-            html_dir,
-            doctree_dir,
-            ('-D', 'sphinx_examples_as_code_conf.include_see_also=0'),
-        ),
-    )
-    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
-
-    py_files = list((html_dir / '_downloads').rglob('*.py'))
-
-    seealso_src = _read(py_files, 'case_seealso.py')
+    seealso_src = _read(built[1], 'case_seealso.py')
     assert '# SEE ALSO:' not in seealso_src
     assert 'Some Target' not in seealso_src
 
+    structured_src = _read(built[1], 'case_seealso_structured')
+    assert '# SEE ALSO:' not in structured_src
+    assert 'Some Target' not in structured_src
+
     for name in (
-        'case_see_also_directive_for_base_url',
-        'case_see_also_bare_rubric_for_base_url',
-        'case_see_also_underline_heading_for_base_url',
+        'case_see_also_directive',
+        'case_see_also_bare_rubric',
+        'case_see_also_underline_heading',
     ):
-        src = _read(py_files, name)
+        src = _read(built[1], name)
         assert '# SEE ALSO:' not in src
         assert 'docstring_cases.Sample' not in src
 

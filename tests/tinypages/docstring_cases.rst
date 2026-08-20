@@ -57,11 +57,11 @@ resolve to.
 
 .. autofunction:: docstring_cases.case_regular_xref_for_base_url
 
-.. autofunction:: docstring_cases.case_see_also_directive_for_base_url
+.. autofunction:: docstring_cases.case_see_also_directive
 
-.. autofunction:: docstring_cases.case_see_also_bare_rubric_for_base_url
+.. autofunction:: docstring_cases.case_see_also_bare_rubric
 
-.. autofunction:: docstring_cases.case_see_also_underline_heading_for_base_url
+.. autofunction:: docstring_cases.case_see_also_underline_heading
 
 .. autoclass:: docstring_cases.Sample
    :members:
