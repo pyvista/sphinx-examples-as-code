@@ -98,14 +98,7 @@ What happens to the content of an Examples section:
   `#` comment.
 - Figures/images, raw HTML, sphinx-design dropdowns/tab-sets, and sphinx-tags' `.. tags::`
   line are dropped entirely.
-- "See Also" content is always dropped, in every one of its forms: a `.. seealso::`
-  admonition, a bare `.. rubric:: See Also`, a hand-written `See Also` heading, or
-  numpydoc's own "See Also" field -- as long as it's written *inside* the Examples
-  section itself. Numpydoc's own field is more commonly reordered outside the Examples
-  section (or hoisted to a heading of its own, alongside a hoisted "Examples") -- this
-  extension never reaches outside the Examples section for anything, so that content is
-  simply left untouched on the rendered page and never makes it into the generated file
-  either way.
+- "See Also" content is always dropped.
 
 Generated `.py` files start with a `# Examples from <qualified name>` title header
 (gallery mode uses the page's own title instead -- see below), with a few whitespace
