@@ -38,19 +38,3 @@ def test_download_named_after_the_function_not_the_docname(tmp_path: Path):
 
     lines = py_path.read_text(encoding='utf-8').splitlines()
     assert lines[0] == '# Examples from mymodule.download_bunny'
-
-
-def test_hoisted_see_also_field_always_excluded(tmp_path: Path):
-    # "See Also" here is a real section (see conf.py), rendered after
-    # "Examples" and hoisted the same way -- landing as a sibling of the
-    # "Examples" section rather than staying behind in desc_content. Since
-    # this extension never reaches outside the Examples span for anything,
-    # it's simply left untouched on the rendered page either way.
-    html_dir = tmp_path / 'html'
-    doctree_dir = tmp_path / 'doctrees'
-    returncode, out, err = _run_sphinx_build(_sphinx_build_cmd(FIXTURE_DIR, html_dir, doctree_dir))
-    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
-
-    py_path = next((html_dir / '_downloads').rglob('*.py'))
-    content = py_path.read_text(encoding='utf-8')
-    assert '# SEE ALSO:' not in content

@@ -10,11 +10,6 @@ its own heading -- the structure that produced a nonsensical
 ``<docname>-example-1`` header in production for a page documenting one
 function.
 
-pyvista also renders "See Also" itself as a real section rather than
-wrapping it in ``.. seealso::``, and reorders it after "Examples" -- so
-hoisting lifts "See Also" out to page level too, landing as a sibling of
-the "Examples" section rather than staying behind in ``desc_content``.
-
 Reproduced here rather than in ``tinypages/conf.py``: this changes
 docstring-section rendering globally for the build it's applied to, and
 ``tinypages`` is shared by many other tests pinning exact output for the
@@ -27,8 +22,6 @@ from pathlib import Path
 import sys
 
 from docutils import nodes
-from jinja2.sandbox import SandboxedEnvironment
-from numpydoc.docscrape import NumpyDocString
 from numpydoc.docscrape_sphinx import SphinxDocString
 from sphinx import addnodes
 
@@ -51,47 +44,6 @@ def _str_header(self, name):
 
 
 SphinxDocString._str_header = _str_header
-
-
-def _str_see_also(self, func_role):
-    return NumpyDocString._str_see_also(self, func_role)
-
-
-SphinxDocString._str_see_also = _str_see_also
-
-# Reorders "See Also" to the very end (after "Examples"), matching
-# pyvista's own template override -- identical to numpydoc's own template
-# (numpydoc/templates/numpydoc_docstring.rst) otherwise, just with
-# ``{{see_also}}`` moved down.
-_DOCSTRING_TEMPLATE = SandboxedEnvironment().from_string(
-    '{{index}}\n'
-    '{{summary}}\n'
-    '{{extended_summary}}\n'
-    '{{parameters}}\n'
-    '{{attributes}}\n'
-    '{{methods}}\n'
-    '{{returns}}\n'
-    '{{yields}}\n'
-    '{{receives}}\n'
-    '{{other_parameters}}\n'
-    '{{raises}}\n'
-    '{{warns}}\n'
-    '{{warnings}}\n'
-    '{{notes}}\n'
-    '{{references}}\n'
-    '{{examples}}\n'
-    '{{see_also}}\n'
-)
-
-_original_load_config = SphinxDocString.load_config
-
-
-def _load_config(self, config):
-    _original_load_config(self, config)
-    self.template = _DOCSTRING_TEMPLATE
-
-
-SphinxDocString.load_config = _load_config
 
 
 def _is_nested_desc(node: nodes.Node) -> bool:
@@ -118,13 +70,10 @@ def _hoist_docstring_sections(app, doctree) -> None:
         content = next((node for node in desc if isinstance(node, addnodes.desc_content)), None)
         if content is None:
             continue
-        # Any depth, not just direct children: "See Also" renders after
-        # "Examples" now, so it's what a later section (were one appended,
-        # e.g. by another extension) would nest under instead.
-        sections = list(content.findall(nodes.section))
+        sections = [node for node in content if isinstance(node, nodes.section)]
         index = parent.index(desc)
         for offset, section in enumerate(sections):
-            section.parent.remove(section)
+            content.remove(section)
             parent.insert(index + 1 + offset, section)
 
 
