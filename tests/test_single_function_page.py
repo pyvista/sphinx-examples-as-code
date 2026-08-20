@@ -40,11 +40,7 @@ def test_download_named_after_the_function_not_the_docname(tmp_path: Path):
     assert lines[0] == '# Examples from mymodule.download_bunny'
 
 
-def test_hoisted_see_also_field_included_by_default(tmp_path: Path):
-    # numpydoc's own "See Also" field is never itself a section, so the
-    # hoisting that moves "Examples" out to page level (see conf.py) leaves
-    # "See Also" behind in the object's own desc_content -- orphaned from
-    # the heading unless _find_external_see_also looks there too.
+def test_hoisted_see_also_field_excluded_by_default(tmp_path: Path):
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(_sphinx_build_cmd(FIXTURE_DIR, html_dir, doctree_dir))
@@ -52,11 +48,14 @@ def test_hoisted_see_also_field_included_by_default(tmp_path: Path):
 
     py_path = next((html_dir / '_downloads').rglob('*.py'))
     content = py_path.read_text(encoding='utf-8')
-    assert '# SEE ALSO:' in content
-    assert 'Download bunny dataset.' in content.split('# SEE ALSO:')[1]
+    assert '# SEE ALSO:' not in content
 
 
-def test_hoisted_see_also_field_excluded_when_disabled(tmp_path: Path):
+def test_hoisted_see_also_field_included_when_enabled(tmp_path: Path):
+    # "See Also" here is a real section (see conf.py), rendered after
+    # "Examples" and hoisted the same way -- landing as a sibling of the
+    # "Examples" section rather than staying behind in desc_content, which
+    # _find_external_see_also must also check.
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(
@@ -64,11 +63,12 @@ def test_hoisted_see_also_field_excluded_when_disabled(tmp_path: Path):
             FIXTURE_DIR,
             html_dir,
             doctree_dir,
-            ('-D', 'sphinx_examples_as_code_conf.include_see_also=0'),
+            ('-D', 'sphinx_examples_as_code_conf.include_see_also=1'),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     py_path = next((html_dir / '_downloads').rglob('*.py'))
     content = py_path.read_text(encoding='utf-8')
-    assert '# SEE ALSO:' not in content
+    assert '# SEE ALSO:' in content
+    assert 'Download bunny dataset.' in content.split('# SEE ALSO:')[1]

@@ -82,11 +82,20 @@ def built(tmp_path_factory) -> tuple[Path, list[Path]]:
             SRCDIR,
             html_dir,
             doctree_dir,
-            # The default footer is exercised by its own dedicated tests
-            # below; disabled here so the many unrelated "absent from the
-            # whole file" assertions elsewhere in this module aren't
-            # incidentally tripped by its (unrelated) text/backticks/URL.
-            ('-D', 'sphinx_examples_as_code_conf.footer='),
+            (
+                # The default footer is exercised by its own dedicated
+                # tests below; disabled here so the many unrelated "absent
+                # from the whole file" assertions elsewhere in this module
+                # aren't incidentally tripped by its (unrelated) text/
+                # backticks/URL.
+                '-D',
+                'sphinx_examples_as_code_conf.footer=',
+                # See Also is opt-in by default; enabled here since most of
+                # this module's tests are exercising See Also behavior
+                # itself.
+                '-D',
+                'sphinx_examples_as_code_conf.include_see_also=1',
+            ),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
@@ -545,6 +554,8 @@ def test_base_url_set_resolves_links(tmp_path: Path):
                 # otherwise trip on the (unrelated) default footer's URL
                 '-D',
                 'sphinx_examples_as_code_conf.footer=',
+                '-D',
+                'sphinx_examples_as_code_conf.include_see_also=1',
             ),
         ),
     )

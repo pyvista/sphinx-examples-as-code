@@ -612,10 +612,13 @@ def _find_external_see_also(
     numpydoc's own "See Also" field is canonically reordered to sit before
     "Examples", as a sibling under ``parent``. If "Examples" was written as
     a real RST heading and hoisted out of its own ``desc_content`` to page
-    level (see ``_enclosing_descs``), "See Also" -- not a ``nodes.section``,
-    so untouched by that hoisting -- stays behind there instead, in the
-    ``desc_content`` of the one ``desc`` that used to contain this heading.
-    Only that nearest enclosing ``desc`` is checked -- not every one
+    level (see ``_enclosing_descs``), "See Also" stays behind there instead
+    -- unless it's *also* a real ``nodes.section`` (e.g. numpydoc's own
+    field left un-wrapped rather than in ``.. seealso::``), in which case
+    the same hoisting lifts it too, landing beside "Examples" one level up
+    rather than in ``desc_content``. Only the immediate next sibling after
+    "Examples"'s own section is checked there, and only that nearest
+    enclosing ``desc``'s ``desc_content`` otherwise -- not every candidate
     ``_enclosing_descs`` yields -- or a page listing several documented
     objects in a row would leak one object's "See Also" onto another's.
     """
@@ -624,6 +627,14 @@ def _find_external_see_also(
             continue
         if _is_see_also_type(child):
             return child
+    if isinstance(parent, nodes.section):
+        grandparent = parent.parent
+        if grandparent is not None:
+            index = grandparent.index(parent)
+            if index + 1 < len(grandparent.children):
+                sibling = grandparent.children[index + 1]
+                if _is_see_also_type(sibling) or _is_see_also_section(sibling):
+                    return sibling
     desc = next(_enclosing_descs(heading), None)
     if desc is not None:
         return _see_also_in_desc_content(desc)
@@ -1170,7 +1181,7 @@ _CONF_DEFAULTS: dict[str, object] = {
     'gallery_downloads': False,
     'footer': _DEFAULT_FOOTER,
     'link_labels': _DEFAULT_LINK_LABELS,
-    'include_see_also': True,
+    'include_see_also': False,
 }
 
 

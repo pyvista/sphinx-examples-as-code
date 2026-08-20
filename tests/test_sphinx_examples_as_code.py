@@ -2512,7 +2512,7 @@ def test_finalize_conf_partial_dict_keeps_the_rest_default():
     assert conf['formats'] == ['py', 'ipynb']
     assert conf['gallery_downloads'] is False
     assert conf['footer'] == seac._DEFAULT_FOOTER
-    assert conf['include_see_also'] is True
+    assert conf['include_see_also'] is False
 
 
 def test_finalize_conf_default_footer_text():
