@@ -474,6 +474,116 @@ def _list_segment(
     return [('directive', lines)] if lines else []
 
 
+#: Narrowest a generated table column may be, per format.
+_TABLE_MIN_WIDTH = {'py': 1, 'ipynb': 3}
+
+
+def _table_cell_text(entry: nodes.entry, ctx: _RenderContext) -> str:
+    """Render one cell's content as a single line, list items separated by ``;``."""
+    parts: list[str] = []
+    for child in entry.children:
+        if isinstance(child, (nodes.bullet_list, nodes.enumerated_list)):
+            items = (_render_inline(item, ctx).strip() for item in child.children)
+            parts.append('; '.join(item for item in items if item))
+        else:
+            parts.append(_render_inline(child, ctx).strip())
+    return ' '.join(part for part in parts if part)
+
+
+def _table_rows(group: nodes.Element, ctx: _RenderContext) -> list[list[str]]:
+    """Render a ``thead``/``tbody``'s rows, padding a column-spanning cell with empties."""
+    rows: list[list[str]] = []
+    for row in group.children:
+        cells: list[str] = []
+        for entry in row.children:
+            cells.append(_table_cell_text(entry, ctx))
+            cells.extend([''] * entry.get('morecols', 0))
+        if any(cells):
+            rows.append(cells)
+    return rows
+
+
+def _table_grid(node: nodes.table, ctx: _RenderContext) -> tuple[list[list[str]], list[list[str]]]:
+    """Split a table into header rows and body rows, dropping any column left empty."""
+    head: list[list[str]] = []
+    body: list[list[str]] = []
+    for tgroup in node.children:
+        if not isinstance(tgroup, nodes.tgroup):
+            continue
+        for group in tgroup.children:
+            if isinstance(group, nodes.thead):
+                head.extend(_table_rows(group, ctx))
+            elif isinstance(group, nodes.tbody):
+                body.extend(_table_rows(group, ctx))
+    columns = max((len(row) for row in [*head, *body]), default=0)
+    for row in [*head, *body]:
+        row.extend([''] * (columns - len(row)))
+    filled = [index for index in range(columns) if any(row[index] for row in body)]
+    if not filled or len(filled) == columns:
+        return head, body
+    return (
+        [[row[index] for index in filled] for row in head],
+        [[row[index] for index in filled] for row in body],
+    )
+
+
+def _table_widths(rows: list[list[str]], minimum: int) -> list[int]:
+    """Measure each column, never narrower than ``minimum``."""
+    return [max(minimum, *map(len, column)) for column in zip(*rows, strict=True)]
+
+
+def _markdown_table_lines(head: list[list[str]], body: list[list[str]]) -> list[str]:
+    """Render rows as a Markdown pipe table, with a blank header row if there is none."""
+    head = [[cell.replace('|', r'\|') for cell in row] for row in head]
+    body = [[cell.replace('|', r'\|') for cell in row] for row in body]
+    widths = _table_widths([*head, *body], _TABLE_MIN_WIDTH['ipynb'])
+
+    def render(cells: list[str]) -> str:
+        padded = (cell.ljust(width) for cell, width in zip(cells, widths, strict=True))
+        return f'| {" | ".join(padded)} |'
+
+    header, *extra = head or [[''] * len(widths)]
+    divider = f'| {" | ".join("-" * width for width in widths)} |'
+    return [render(header), divider, *(render(cells) for cells in [*extra, *body])]
+
+
+def _simple_table_lines(head: list[list[str]], body: list[list[str]]) -> list[str]:
+    """Render rows as an RST simple table, bordered above, below and under its header."""
+    widths = _table_widths([*head, *body], _TABLE_MIN_WIDTH['py'])
+    border = '  '.join('=' * width for width in widths)
+
+    def render(cells: list[str]) -> str:
+        return '  '.join(
+            cell.ljust(width) for cell, width in zip(cells, widths, strict=True)
+        ).rstrip()
+
+    lines = [border]
+    for rows in (head, body):
+        if rows:
+            lines.extend(render(cells) for cells in rows)
+            lines.append(border)
+    return lines
+
+
+def _table_segment(node: nodes.table, ctx: _RenderContext) -> list[Segment]:
+    """Convert a table to an RST simple table in ``.py``, a Markdown one in ``.ipynb``.
+
+    Each cell is flattened to a single line, the caption sits above.
+    """
+    head, body = _table_grid(node, ctx)
+    if not head and not body:
+        return []
+    lines: list[str] = []
+    caption = next((child for child in node.children if isinstance(child, nodes.title)), None)
+    if caption is not None and (text := _render_inline(caption, ctx).strip()):
+        _add_comment(lines, text)
+        lines.append('#')
+    render = _markdown_table_lines if ctx.fmt == 'ipynb' else _simple_table_lines
+    for line in render(head, body):
+        _add_comment(lines, line)
+    return [('directive', lines)]
+
+
 def _convert_admonition(
     node: nodes.Element, label: str, ctx: _RenderContext, *, skip_first_title: bool = False
 ) -> list[Segment]:
@@ -527,6 +637,8 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
         return _definition_segment(node, ctx)
     if isinstance(node, (nodes.bullet_list, nodes.enumerated_list)):
         return _list_segment(node, ctx)
+    if isinstance(node, nodes.table):
+        return _table_segment(node, ctx)
     if isinstance(node, (*_CONTAINER_TYPES, nodes.section)):
         # nodes.section (gallery mode only): a sphinx-gallery ``# %%`` cell
         # with its own RST heading is a *sibling* section at the document

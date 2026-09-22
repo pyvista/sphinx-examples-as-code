@@ -13,6 +13,10 @@ resolve to.
 
 .. autofunction:: docstring_cases.case_tabset
 
+.. autofunction:: docstring_cases.case_table
+
+.. autofunction:: docstring_cases.case_table_without_header
+
 .. autofunction:: docstring_cases.case_note
 
 .. autofunction:: docstring_cases.case_warning

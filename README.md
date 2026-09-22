@@ -96,6 +96,10 @@ What happens to the content of an Examples section:
   backticks.
 - Everything else text-bearing (prose, captions, other non-Python code) becomes a plain
   `#` comment.
+- A table becomes an aligned text table, its caption on the line above: an RST simple
+  table in `.py`, a Markdown pipe table in `.ipynb`. Each cell is flattened to a single
+  line, and a column left entirely empty -- one holding only images, say -- is dropped
+  along with its heading.
 - Figures/images, raw HTML, sphinx-design dropdowns/tab-sets, and sphinx-tags' `.. tags::`
   line are dropped entirely.
 - "See Also" content is always dropped.

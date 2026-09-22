@@ -45,6 +45,44 @@ def case_tabset():
     """
 
 
+def case_table():
+    """Docstring with a table in its Examples section.
+
+    Examples
+    --------
+    >>> import sys
+
+    .. list-table:: Line styles
+       :header-rows: 1
+
+       * - Style
+         - Description
+         - Example
+       * - ``"-"``
+         - Solid
+         -
+       * - ``"--"``
+         - Dashed
+         -
+
+    """
+
+
+def case_table_without_header():
+    """Docstring with a header-less table in its Examples section.
+
+    Examples
+    --------
+    >>> import sys
+
+    .. list-table::
+
+       * - left
+         - right
+
+    """
+
+
 def case_note():
     """Docstring with a note in its Examples section.
 
