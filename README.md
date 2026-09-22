@@ -148,9 +148,10 @@ styles:
 
 Two things worth knowing before turning this on:
 
-- It's built against sphinx-gallery's own RST/HTML output (the same `sphx-glr-*` CSS
-  classes its own theming depends on), not a documented extension API. A future
-  sphinx-gallery release could shift that structure without warning.
+- It's built against sphinx-gallery's own doctree output — the `sphx-glr-*` CSS classes
+  its own theming depends on, and the private node type holding a highlighted code
+  block — not a documented extension API. A future sphinx-gallery release could shift
+  that structure without warning. Tested against sphinx-gallery 0.22 and later.
 - sphinx-gallery's own `.py`/`.ipynb`/`.zip` downloads still end up copied into
   `_downloads/`, even though nothing on the page links to them anymore.
 

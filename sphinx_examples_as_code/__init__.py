@@ -91,6 +91,22 @@ _ADMONITION_LABELS = {
 
 _PYTHON_LANGUAGES = ('python', 'py', 'python3')
 
+# sphinx-gallery's own node type for a gallery example's Python code, in
+# place of a ``literal_block``: one child per pygments token, so that names
+# in the code can carry links to their documentation. Its language is spelled
+# ``lang``, and its source has to be read back off its children. Code in any
+# other language stays an ordinary ``literal_block``.
+#
+# Matched by tag name rather than by ``isinstance``: sphinx-gallery is not a
+# dependency of this extension (gallery support is opt-in via
+# ``gallery_downloads``), so the class itself can't be imported here.
+_GALLERY_CODE_BLOCK_TAGNAME = 'code_links_block'
+
+# Class on the ``inline`` nodes sphinx-gallery interleaves into the above when
+# the block has line numbers turned on. Rendering furniture, not source, so
+# they're dropped rather than baked into the generated file.
+_GALLERY_LINENOS_CLASS = 'linenos'
+
 # A chunk of generated lines tagged with how it should be spaced relative to
 # its neighbors when segments are joined (see ``_join_segments``):
 #   'code'      real Python source
@@ -319,16 +335,34 @@ def _convert_doctest_block(node: nodes.doctest_block) -> list[Segment]:
     return [('code', lines)]
 
 
-def _convert_literal_block(node: nodes.literal_block) -> list[Segment]:
+def _is_gallery_code_block(node: nodes.Node) -> bool:
+    """Check whether ``node`` is the node type sphinx-gallery puts example code in."""
+    return getattr(node, 'tagname', None) == _GALLERY_CODE_BLOCK_TAGNAME
+
+
+def _gallery_code_block_source(node: nodes.Element) -> str:
+    """Reassemble the source text sphinx-gallery split across per-token nodes."""
+    # One child per pygments token (some wrapped in a reference node), which
+    # ``astext()`` joins back together with no separator -- apart from the
+    # line-number nodes, which were never part of the source.
+    return ''.join(
+        child.astext() for child in node.children if not _has_class(child, _GALLERY_LINENOS_CLASS)
+    )
+
+
+def _convert_literal_block(node: nodes.Element) -> list[Segment]:
     """Convert a ``.. code-block::``. Python blocks stay code, others become comments."""
-    language = node.get('language', '')
+    if _is_gallery_code_block(node):
+        language, source = node.get('lang', ''), _gallery_code_block_source(node)
+    else:
+        language, source = node.get('language', ''), node.astext()
     # Case-insensitive: sphinx-gallery emits ``.. code-block:: Python`` (capitalized).
     if language.lower() in _PYTHON_LANGUAGES:
-        lines = [_clean_code_comment(line) for line in node.astext().splitlines()]
+        lines = [_clean_code_comment(line) for line in source.splitlines()]
         while lines and not lines[-1].strip():
             lines.pop()
         return [('code', lines)] if lines else []
-    text = node.astext().strip()
+    text = source.strip()
     if not text:
         return []
     comment_lines: list[str] = []
@@ -495,7 +529,7 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
         return []
     if isinstance(node, nodes.doctest_block):
         return _convert_doctest_block(node)
-    if isinstance(node, nodes.literal_block):
+    if isinstance(node, nodes.literal_block) or _is_gallery_code_block(node):
         return _convert_literal_block(node)
     if type(node) in _ADMONITION_LABELS:
         if _is_see_also_type(node):
