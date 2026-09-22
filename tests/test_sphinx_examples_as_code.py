@@ -759,6 +759,136 @@ def test_list_segment_ipynb_link_item_renders_as_markdown_link():
 
 
 # ---------------------------------------------------------------------------
+# _table_segment
+# ---------------------------------------------------------------------------
+
+_SIMPLE_TABLE = """
+.. list-table::
+   :header-rows: 1
+
+   * - Style
+     - Description
+   * - ``"-"``
+     - Solid
+"""
+
+_IMAGE_COLUMN_TABLE = """
+.. list-table::
+   :header-rows: 1
+
+   * - Style
+     - Example
+   * - Solid
+     - .. image:: solid.png
+"""
+
+_BLANK_BODY_TABLE = """
+.. list-table::
+   :header-rows: 1
+
+   * - Style
+     - Example
+   * -
+     -
+"""
+
+_SPANNING_TABLE = """
++------+------+
+| a    | b    |
++------+------+
+| spans both  |
++------+------+
+"""
+
+
+def test_table_segment_py_is_an_rst_simple_table():
+    doctree = _parse(_SIMPLE_TABLE)
+    assert seac._convert_node(doctree[0], _ctx()) == [
+        (
+            'directive',
+            [
+                '# =====  ===========',
+                '# Style  Description',
+                '# =====  ===========',
+                '# `"-"`  Solid',
+                '# =====  ===========',
+            ],
+        )
+    ]
+
+
+def test_table_segment_ipynb_is_a_markdown_table():
+    doctree = _parse(_SIMPLE_TABLE)
+    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+        (
+            'directive',
+            [
+                '# | Style | Description |',
+                '# | ----- | ----------- |',
+                '# | `"-"` | Solid       |',
+            ],
+        )
+    ]
+
+
+def test_table_segment_caption_sits_above_the_table():
+    doctree = _parse('.. list-table:: Line styles\n\n   * - one\n')
+    kind, lines = seac._convert_node(doctree[0], _ctx())[0]
+    assert kind == 'directive'
+    assert lines[:2] == ['# Line styles', '#']
+
+
+def test_table_segment_header_less_table_has_no_inner_border():
+    doctree = _parse('.. list-table::\n\n   * - a\n     - b\n   * - c\n     - d\n')
+    assert seac._convert_node(doctree[0], _ctx()) == [
+        ('directive', ['# =  =', '# a  b', '# c  d', '# =  ='])
+    ]
+
+
+def test_table_segment_header_less_table_gets_a_blank_markdown_header():
+    doctree = _parse('.. list-table::\n\n   * - a\n     - b\n')
+    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+        ('directive', ['# |     |     |', '# | --- | --- |', '# | a   | b   |'])
+    ]
+
+
+def test_table_segment_image_only_column_is_dropped():
+    doctree = _parse(_IMAGE_COLUMN_TABLE)
+    _kind, lines = seac._convert_node(doctree[0], _ctx())[0]
+    assert lines == ['# =====', '# Style', '# =====', '# Solid', '# =====']
+
+
+def test_table_segment_blank_body_row_is_dropped_with_every_column_kept():
+    doctree = _parse(_BLANK_BODY_TABLE)
+    _kind, lines = seac._convert_node(doctree[0], _ctx())[0]
+    assert lines == ['# =====  =======', '# Style  Example', '# =====  =======']
+
+
+def test_table_segment_column_span_pads_with_empty_cells():
+    doctree = _parse(_SPANNING_TABLE)
+    _kind, lines = seac._convert_node(doctree[0], _ctx())[0]
+    assert lines == ['# ==========  =', '# a           b', '# spans both', '# ==========  =']
+
+
+def test_table_segment_markdown_escapes_a_pipe_in_a_cell():
+    doctree = _parse('.. list-table::\n\n   * - ``a | b``\n')
+    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+        ('directive', ['# |          |', '# | -------- |', r'# | `a \| b` |'])
+    ]
+
+
+def test_table_segment_list_in_a_cell_separates_items():
+    doctree = _parse('.. list-table::\n\n   * - - first\n       - second\n')
+    assert seac._convert_node(doctree[0], _ctx()) == [
+        ('directive', ['# =============', '# first; second', '# ============='])
+    ]
+
+
+def test_table_segment_empty_table_returns_nothing():
+    assert seac._convert_node(nodes.table(), _ctx()) == []
+
+
+# ---------------------------------------------------------------------------
 # _convert_admonition / _convert_node dispatch
 # ---------------------------------------------------------------------------
 

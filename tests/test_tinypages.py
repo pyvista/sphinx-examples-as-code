@@ -211,6 +211,56 @@ def test_docstring_examples_conversion(built: tuple[Path, list[Path]]):
     assert '3' not in combined_src  # doctest output line dropped entirely, not commented
 
 
+def test_table_becomes_an_rst_simple_table_in_py(built: tuple[Path, list[Path]]):
+    """A table converts to an aligned RST simple table, captioned above it."""
+    lines = _read(built[1], 'case_table.py').splitlines()
+    start = lines.index('# Line styles')
+    assert lines[start + 1] == '#'
+    assert lines[start + 2] == '# ======  ==========='
+    assert lines[start + 3] == '# Style   Description'
+    assert lines[start + 4] == '# ======  ==========='
+    assert lines[start + 5] == '# `"-"`   Solid'
+    assert lines[start + 6] == '# `"--"`  Dashed'
+    assert lines[start + 7] == '# ======  ==========='
+    # the "Example" column holds nothing in any row, so it is dropped
+    assert 'Example' not in '\n'.join(lines[start : start + 8])
+
+
+def test_table_becomes_a_markdown_table_in_ipynb(built_notebooks: list[Path]):
+    """The same table is a Markdown pipe table in a notebook's markdown cell."""
+    nb_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_table')
+    notebook = json.loads(nb_path.read_text(encoding='utf-8'))
+    lines = [
+        line.rstrip()
+        for cell in notebook['cells']
+        if cell['cell_type'] == 'markdown'
+        for line in cell['source']
+    ]
+    start = lines.index('Line styles')
+    assert lines[start + 1] == ''
+    assert lines[start + 2] == '| Style  | Description |'
+    assert lines[start + 3] == '| ------ | ----------- |'
+    assert lines[start + 4] == '| `"-"`  | Solid       |'
+    assert lines[start + 5] == '| `"--"` | Dashed      |'
+
+
+def test_header_less_table_gets_a_blank_markdown_header(built_notebooks: list[Path]):
+    """A Markdown pipe table needs a header row, so one is left blank."""
+    nb_path = next(
+        p for p in built_notebooks if p.stem == 'docstring_cases_case_table_without_header'
+    )
+    notebook = json.loads(nb_path.read_text(encoding='utf-8'))
+    lines = [
+        line.rstrip()
+        for cell in notebook['cells']
+        if cell['cell_type'] == 'markdown'
+        for line in cell['source']
+    ]
+    assert '|      |       |' in lines
+    assert '| ---- | ----- |' in lines
+    assert '| left | right |' in lines
+
+
 def test_no_doctest_output_included(built: tuple[Path, list[Path]]):
     """Doctest output lines should never appear anywhere -- only the input code."""
     src = _read(built[1], 'case_doctest_with_output')
