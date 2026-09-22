@@ -25,7 +25,7 @@ jobs:
     - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4   # v10.1.0
       with:
         enable-cache: false
-    - run: uv sync --group dev
+    - run: uv sync --group dev --extra gallery
     - run: uv run pre-commit run --all-files --show-diff-on-failure
       env:
           # This hook exists to stop *local* commits straight to main; it
@@ -49,7 +49,7 @@ jobs:
     - uses: pyvista/setup-headless-display-action@c103a2ff45650d38cb71684b5dc6cdfeb9442c79   # v5.1.0
       with:
         pyvista: true
-    - run: uv sync --group dev --python ${{ matrix.python-version }}
+    - run: uv sync --group dev --extra gallery --python ${{ matrix.python-version }}
     - run: uv run pytest tests/ --cov --cov-report=xml
     - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f   # v7.0.0
       with:

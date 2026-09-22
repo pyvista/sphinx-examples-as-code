@@ -12,6 +12,13 @@ Pages or docstrings without an Examples section are left completely untouched. A
 pip install sphinx-examples-as-code
 ```
 
+Sphinx-Gallery integration is opt-in and needs a compatible sphinx-gallery, which the
+`gallery` extra pins:
+
+```bash
+pip install 'sphinx-examples-as-code[gallery]'
+```
+
 Add it to your Sphinx `conf.py`:
 
 ```python
@@ -155,14 +162,15 @@ Two things worth knowing before turning this on:
 - It's built against sphinx-gallery's own doctree output — the `sphx-glr-*` CSS classes
   its own theming depends on, and the private node type holding a highlighted code
   block — not a documented extension API. A future sphinx-gallery release could shift
-  that structure without warning. Tested against sphinx-gallery 0.22 and later.
+  that structure without warning. Only sphinx-gallery 0.22.x is tested, so the `gallery`
+  extra caps there rather than letting the next release quietly produce no downloads.
 - sphinx-gallery's own `.py`/`.ipynb`/`.zip` downloads still end up copied into
   `_downloads/`, even though nothing on the page links to them anymore.
 
 ## Development
 
 ```bash
-uv sync --group dev
+uv sync --group dev --extra gallery
 uv run pytest
 uv run pre-commit run --all-files
 ```
