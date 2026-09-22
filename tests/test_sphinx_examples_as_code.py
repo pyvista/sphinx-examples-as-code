@@ -16,6 +16,7 @@ from docutils.core import publish_doctree
 import pytest
 from sphinx import addnodes
 from sphinx.errors import ConfigError
+from sphinx_gallery._doctree_links import code_links_block
 
 import sphinx_examples_as_code as seac
 
@@ -387,6 +388,94 @@ def test_convert_literal_block_python_whitespace_only():
     node = nodes.literal_block('', '   \n   ')
     node['language'] = 'python'
     assert seac._convert_literal_block(node) == []
+
+
+# ---------------------------------------------------------------------------
+# _convert_literal_block: sphinx-gallery's own code-block node
+# ---------------------------------------------------------------------------
+
+
+def _token(text: str, css_class: str | None = None) -> nodes.Node:
+    """Build one pygments token, as sphinx-gallery emits it.
+
+    A classified token becomes an ``inline`` carrying the pygments short
+    class; the root token type is left unwrapped, as bare text.
+    """
+    if css_class is None:
+        return nodes.Text(text)
+    return nodes.inline(text, text, classes=[css_class])
+
+
+def _linked_token(text: str, css_class: str) -> nodes.reference:
+    """Build a name sphinx-gallery resolved to a documented object, so wrapped in a link."""
+    return nodes.reference('', '', _token(text, css_class), refuri='index.html#int')
+
+
+def _gallery_code_block(*children: nodes.Node, lang: str = 'Python') -> nodes.Element:
+    """Build one of sphinx-gallery's tokenized code blocks out of ``children``."""
+    node = code_links_block(lang=lang)
+    node += list(children)
+    return node
+
+
+def test_gallery_code_block_contract():
+    """Pin down what the extension assumes about sphinx-gallery's own node.
+
+    It is private to sphinx-gallery, and it replaces every Python code block
+    on a gallery page before this extension ever sees the doctree -- so a
+    change to any of these three leaves each example a block of comments
+    with no download link at all. Asserted here, where a failure names the
+    assumption that moved, rather than only surfacing further downstream as
+    a mangled download.
+    """
+    node = code_links_block(lang='Python')
+    node += [nodes.inline('x', 'x', classes=['n']), nodes.Text(' = 1')]
+
+    assert node.tagname == seac._GALLERY_CODE_BLOCK_TAGNAME
+    assert node['lang'] == 'Python'  # not 'language', as a literal_block spells it
+    assert node.astext() == 'x = 1'  # children concatenate, with nothing between
+
+
+def test_convert_literal_block_gallery_code_block():
+    # The source arrives as a stream of per-token nodes of three different
+    # kinds -- bare text, a classified inline, and a reference around a name
+    # that resolved -- so it has to be stitched back together rather than
+    # just read off the node.
+    node = _gallery_code_block(
+        _token('x', 'n'),
+        _token(' = '),
+        _token('1', 'mi'),
+        _token('\n', 'w'),
+        _token('print', 'nb'),
+        _token('(', 'p'),
+        _linked_token('x', 'n'),
+        _token(')', 'p'),
+        _token('\n', 'w'),
+    )
+    assert seac._convert_literal_block(node) == [('code', ['x = 1', 'print(x)'])]
+
+
+def test_convert_literal_block_gallery_code_block_reads_lang_not_language():
+    # Read from 'language' (which this node type doesn't set) the language
+    # comes back empty, and real code quietly degrades into comments.
+    node = _gallery_code_block(_token('x = 1'))
+    assert 'language' not in node
+    assert seac._convert_literal_block(node) == [('code', ['x = 1'])]
+
+
+def test_convert_literal_block_gallery_code_block_drops_line_numbers():
+    # With line numbers on, sphinx-gallery interleaves them as inline nodes
+    # of their own -- page furniture that was never part of the source, so
+    # it must not be baked into the generated script.
+    node = _gallery_code_block(
+        _token(' 9', 'linenos'),
+        _token('x', 'n'),
+        _token(' = 1\n'),
+        _token('10', 'linenos'),
+        _token('y', 'n'),
+        _token(' = 2\n'),
+    )
+    assert seac._convert_literal_block(node) == [('code', ['x = 1', 'y = 2'])]
 
 
 # ---------------------------------------------------------------------------
@@ -800,6 +889,24 @@ def test_convert_node_literal_block_dispatch():
     node['language'] = 'python'
 
     assert seac._convert_node(node, _ctx()) == [('code', ['x = 1'])]
+
+
+def test_convert_node_gallery_code_block_dispatch():
+    # Unrecognized, this node falls through to the prose branch and the whole
+    # example turns into comments -- leaving nothing the extension counts as
+    # real code, and so no download link at all.
+    node = _gallery_code_block(_token('x', 'n'), _token(' = '), _token('1', 'mi'))
+
+    assert seac._convert_node(node, _ctx()) == [('code', ['x = 1'])]
+
+
+def test_convert_node_gallery_code_block_script_out_still_skipped():
+    # sphinx-gallery copies the original block's classes onto the node it
+    # swaps in, so captured output it happened to rewrite stays excluded.
+    node = _gallery_code_block(_token('3'))
+    node['classes'] = ['sphx-glr-script-out']
+
+    assert seac._convert_node(node, _ctx()) == []
 
 
 # ---------------------------------------------------------------------------

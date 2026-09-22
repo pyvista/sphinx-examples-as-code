@@ -11,7 +11,7 @@ dev = [
   'pytest-cov',
   'sphinx',
   'sphinx-design',
-  'sphinx-gallery>=0.21.0',
+  'sphinx-gallery>=0.22',
   'trame-pyvista',
 ]
 
