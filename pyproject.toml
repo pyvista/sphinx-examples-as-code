@@ -4,6 +4,7 @@ requires = ['setuptools>=64', 'setuptools_scm>=8']
 
 [dependency-groups]
 dev = [
+  'marimo>=0.14',
   'nbformat',
   'numpydoc',
   'pre-commit',
@@ -42,6 +43,7 @@ requires-python = '>=3.10'
 
 [project.optional-dependencies]
 gallery = ['sphinx-gallery>=0.22,<0.23']
+marimo = ['marimo>=0.14']
 
 [project.urls]
 Homepage = 'https://github.com/pyvista/sphinx-examples-as-code'

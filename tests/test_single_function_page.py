@@ -29,12 +29,12 @@ def test_download_named_after_the_function_not_the_docname(tmp_path: Path):
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    py_files = list(downloads_dir.rglob('*.py'))
-    assert len(py_files) == 1, f'expected exactly one generated .py, got {py_files}'
-    py_path = py_files[0]
+    python_files = [p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py')]
+    assert len(python_files) == 1, f'expected exactly one generated .py, got {python_files}'
+    python_path = python_files[0]
 
     # not "index-example-1" (the docname-derived fallback name)
-    assert py_path.stem == 'mymodule_download_bunny'
+    assert python_path.stem == 'mymodule_download_bunny'
 
-    lines = py_path.read_text(encoding='utf-8').splitlines()
+    lines = python_path.read_text(encoding='utf-8').splitlines()
     assert lines[0] == '# Examples from mymodule.download_bunny'

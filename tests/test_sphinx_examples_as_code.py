@@ -32,7 +32,7 @@ def _parse(rst: str) -> nodes.document:
 
 def _ctx(
     *,
-    fmt: str = 'py',
+    fmt: str = 'python',
     in_footer: bool = False,
     base_url: str | None = None,
     docname: str = 'page',
@@ -224,50 +224,50 @@ def _reference_plain(display: str, refuri: str | None) -> nodes.reference:
 
 def test_render_reference_code_no_url_backtick_wrapped():
     ref = _reference_with_literal('pyvista.Plotter', None)
-    assert seac._render_reference(ref, _ctx(fmt='py')) == '`pyvista.Plotter`'
-    assert seac._render_reference(ref, _ctx(fmt='ipynb')) == '`pyvista.Plotter`'
+    assert seac._render_reference(ref, _ctx(fmt='python')) == '`pyvista.Plotter`'
+    assert seac._render_reference(ref, _ctx(fmt='jupyter')) == '`pyvista.Plotter`'
 
 
 def test_render_reference_plain_no_url_no_backticks():
     ref = _reference_plain('Some Section', None)
-    assert seac._render_reference(ref, _ctx(fmt='py')) == 'Some Section'
-    assert seac._render_reference(ref, _ctx(fmt='ipynb')) == 'Some Section'
+    assert seac._render_reference(ref, _ctx(fmt='python')) == 'Some Section'
+    assert seac._render_reference(ref, _ctx(fmt='jupyter')) == 'Some Section'
 
 
-def test_render_reference_py_omits_url_even_when_resolved():
+def test_render_reference_python_omits_url_even_when_resolved():
     ref = _reference_with_literal('pyvista.Plotter', 'plotter.html')
-    ctx = _ctx(fmt='py', base_url='https://docs.pyvista.org/')
+    ctx = _ctx(fmt='python', base_url='https://docs.pyvista.org/')
     assert seac._render_reference(ref, ctx) == '`pyvista.Plotter`'
 
 
-def test_render_reference_ipynb_code_resolved_becomes_markdown_link():
+def test_render_reference_jupyter_code_resolved_becomes_markdown_link():
     ref = _reference_with_literal('pyvista.Plotter', 'plotter.html')
-    ctx = _ctx(fmt='ipynb', base_url='https://docs.pyvista.org/')
+    ctx = _ctx(fmt='jupyter', base_url='https://docs.pyvista.org/')
     assert (
         seac._render_reference(ref, ctx)
         == '[`pyvista.Plotter`](https://docs.pyvista.org/plotter.html)'
     )
 
 
-def test_render_reference_ipynb_plain_resolved_becomes_markdown_link():
+def test_render_reference_jupyter_plain_resolved_becomes_markdown_link():
     ref = _reference_plain('Some Section', 'other.html')
-    ctx = _ctx(fmt='ipynb', base_url='https://docs.pyvista.org/')
+    ctx = _ctx(fmt='jupyter', base_url='https://docs.pyvista.org/')
     assert seac._render_reference(ref, ctx) == '[Some Section](https://docs.pyvista.org/other.html)'
 
 
-def test_render_reference_py_in_footer_uses_name_and_url_inline():
+def test_render_reference_python_in_footer_uses_name_and_url_inline():
     # unlike elsewhere in .py, the footer writes the link inline as
     # "name url", no surrounding newlines
     ref = _reference_plain('sphinx-examples-as-code', 'repo.html')
-    ctx = _ctx(fmt='py', in_footer=True, base_url='https://docs.pyvista.org/')
+    ctx = _ctx(fmt='python', in_footer=True, base_url='https://docs.pyvista.org/')
     result = seac._render_reference(ref, ctx)
     assert result == 'sphinx-examples-as-code https://docs.pyvista.org/repo.html'
 
 
-def test_render_reference_ipynb_in_footer_same_as_elsewhere():
+def test_render_reference_jupyter_in_footer_same_as_elsewhere():
     ref = _reference_plain('sphinx-examples-as-code', 'repo.html')
-    ctx_outside = _ctx(fmt='ipynb', in_footer=False, base_url='https://docs.pyvista.org/')
-    ctx_inside = _ctx(fmt='ipynb', in_footer=True, base_url='https://docs.pyvista.org/')
+    ctx_outside = _ctx(fmt='jupyter', in_footer=False, base_url='https://docs.pyvista.org/')
+    ctx_inside = _ctx(fmt='jupyter', in_footer=True, base_url='https://docs.pyvista.org/')
     assert seac._render_reference(ref, ctx_outside) == seac._render_reference(ref, ctx_inside)
 
 
@@ -543,23 +543,23 @@ def test_indent_comment_line_code_line_unchanged():
     assert seac._indent_comment_line('x = 1') == 'x = 1'
 
 
-def test_indent_label_content_py_indents_everything_after_the_first_line():
+def test_indent_label_content_python_indents_everything_after_the_first_line():
     lines = ['# NOTE:', '# hello', '# world']
-    assert seac._indent_label_content(lines, 'py') == ['# NOTE:', '#     hello', '#     world']
+    assert seac._indent_label_content(lines, 'python') == ['# NOTE:', '#     hello', '#     world']
 
 
-def test_indent_label_content_ipynb_unchanged():
+def test_indent_label_content_jupyter_unchanged():
     lines = ['# NOTE:', '# hello', '# world']
-    assert seac._indent_label_content(lines, 'ipynb') == lines
+    assert seac._indent_label_content(lines, 'jupyter') == lines
 
 
 def test_indent_label_content_empty_list_unchanged():
-    assert seac._indent_label_content([], 'py') == []
+    assert seac._indent_label_content([], 'python') == []
 
 
 def test_indent_label_content_skips_only_the_first_line():
     # a lone label with no content: nothing after it to indent
-    assert seac._indent_label_content(['# NOTE:'], 'py') == ['# NOTE:']
+    assert seac._indent_label_content(['# NOTE:'], 'python') == ['# NOTE:']
 
 
 def test_indent_label_content_fills_gap_between_two_comment_lines():
@@ -567,7 +567,7 @@ def test_indent_label_content_fills_gap_between_two_comment_lines():
     # _join_segments) must not read as the comment block ending partway
     # through
     lines = ['# SEE ALSO:', '# intro', '', '# - item one']
-    assert seac._indent_label_content(lines, 'py') == [
+    assert seac._indent_label_content(lines, 'python') == [
         '# SEE ALSO:',
         '#     intro',
         '#',
@@ -580,7 +580,7 @@ def test_indent_label_content_keeps_real_blank_next_to_code():
     # test_convert_node_note_with_code_indents_text_not_code) stays a real
     # blank line -- turning it into '#' would misrepresent it as a comment
     lines = ['# NOTE:', '# intro', '', 'x = 1']
-    assert seac._indent_label_content(lines, 'py') == ['# NOTE:', '#     intro', '', 'x = 1']
+    assert seac._indent_label_content(lines, 'python') == ['# NOTE:', '#     intro', '', 'x = 1']
 
 
 # ---------------------------------------------------------------------------
@@ -639,18 +639,18 @@ def _definition_list_item(term_text: str, definition_text: str) -> nodes.definit
     return item
 
 
-def test_definition_segment_py_indents_content():
+def test_definition_segment_python_indents_content():
     item = _definition_list_item('Bunny Dataset', 'See the gallery for more info.')
     definition = item[1]
-    assert seac._convert_node(definition, _ctx(fmt='py')) == [
+    assert seac._convert_node(definition, _ctx(fmt='python')) == [
         ('text', ['#     See the gallery for more info.'])
     ]
 
 
-def test_definition_segment_ipynb_not_indented():
+def test_definition_segment_jupyter_not_indented():
     item = _definition_list_item('Bunny Dataset', 'See the gallery for more info.')
     definition = item[1]
-    assert seac._convert_node(definition, _ctx(fmt='ipynb')) == [
+    assert seac._convert_node(definition, _ctx(fmt='jupyter')) == [
         ('text', ['# See the gallery for more info.'])
     ]
 
@@ -659,7 +659,7 @@ def test_definition_segment_empty_returns_empty():
     assert seac._convert_node(nodes.definition(), _ctx()) == []
 
 
-def test_definition_segment_py_fills_gap_before_nested_list():
+def test_definition_segment_python_fills_gap_before_nested_list():
     # a paragraph followed by a nested bullet list inside one definition --
     # the forced blank line between them (see _join_segments) must not
     # break the definition out of its own '#'-commented block
@@ -671,7 +671,7 @@ def test_definition_segment_py_fills_gap_before_nested_list():
     bullet_list += item
     definition += bullet_list
 
-    assert seac._convert_node(definition, _ctx(fmt='py')) == [
+    assert seac._convert_node(definition, _ctx(fmt='python')) == [
         ('text', ['#     intro text', '#', '#     - first item'])
     ]
 
@@ -680,7 +680,7 @@ def test_convert_node_definition_list_item_term_not_indented_definition_is():
     # the term itself stays at the surrounding indent level -- only its
     # definition (the body nested under it) gets the extra indent
     item = _definition_list_item('Bunny Dataset', 'See the gallery for more info.')
-    segments = seac._convert_node(item, _ctx(fmt='py'))
+    segments = seac._convert_node(item, _ctx(fmt='python'))
     lines = seac._join_segments(segments)
     assert lines == ['# Bunny Dataset', '#     See the gallery for more info.']
 
@@ -746,7 +746,7 @@ def test_list_segment_non_list_item_child_skipped():
     assert seac._convert_node(blist, _ctx()) == [('directive', ['# - Real item'])]
 
 
-def test_list_segment_ipynb_link_item_renders_as_markdown_link():
+def test_list_segment_jupyter_link_item_renders_as_markdown_link():
     item = nodes.list_item()
     paragraph = nodes.paragraph()
     reference = nodes.reference('', refuri='https://example.com/read')
@@ -755,7 +755,7 @@ def test_list_segment_ipynb_link_item_renders_as_markdown_link():
     item += paragraph
     blist = nodes.bullet_list()
     blist += item
-    assert seac._convert_node(blist, _ctx(fmt='ipynb')) == [
+    assert seac._convert_node(blist, _ctx(fmt='jupyter')) == [
         ('directive', ['# - [Load and Plot from a File](https://example.com/read)'])
     ]
 
@@ -803,7 +803,7 @@ _SPANNING_TABLE = """
 """
 
 
-def test_table_segment_py_is_an_rst_simple_table():
+def test_table_segment_python_is_an_rst_simple_table():
     doctree = _parse(_SIMPLE_TABLE)
     assert seac._convert_node(doctree[0], _ctx()) == [
         (
@@ -819,9 +819,9 @@ def test_table_segment_py_is_an_rst_simple_table():
     ]
 
 
-def test_table_segment_ipynb_is_a_markdown_table():
+def test_table_segment_jupyter_is_a_markdown_table():
     doctree = _parse(_SIMPLE_TABLE)
-    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+    assert seac._convert_node(doctree[0], _ctx(fmt='jupyter')) == [
         (
             'directive',
             [
@@ -849,7 +849,7 @@ def test_table_segment_header_less_table_has_no_inner_border():
 
 def test_table_segment_header_less_table_gets_a_blank_markdown_header():
     doctree = _parse('.. list-table::\n\n   * - a\n     - b\n')
-    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+    assert seac._convert_node(doctree[0], _ctx(fmt='jupyter')) == [
         ('directive', ['# |     |     |', '# | --- | --- |', '# | a   | b   |'])
     ]
 
@@ -874,7 +874,7 @@ def test_table_segment_column_span_pads_with_empty_cells():
 
 def test_table_segment_markdown_escapes_a_pipe_in_a_cell():
     doctree = _parse('.. list-table::\n\n   * - ``a | b``\n')
-    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+    assert seac._convert_node(doctree[0], _ctx(fmt='jupyter')) == [
         ('directive', ['# |          |', '# | -------- |', r'# | `a \| b` |'])
     ]
 
@@ -897,17 +897,17 @@ def test_table_segment_empty_table_returns_nothing():
 
 def test_convert_node_note():
     doctree = _parse('.. note::\n\n   hello')
-    assert seac._convert_node(doctree[0], _ctx(fmt='py')) == [
+    assert seac._convert_node(doctree[0], _ctx(fmt='python')) == [
         ('directive', ['# NOTE:', '#     hello'])
     ]
 
 
-def test_convert_node_note_ipynb_not_indented():
+def test_convert_node_note_jupyter_not_indented():
     # unlike .py, .ipynb content isn't indented under the label -- once
     # rendered as markdown, leading whitespace within a paragraph collapses
     # to nothing anyway
     doctree = _parse('.. note::\n\n   hello')
-    assert seac._convert_node(doctree[0], _ctx(fmt='ipynb')) == [
+    assert seac._convert_node(doctree[0], _ctx(fmt='jupyter')) == [
         ('directive', ['# NOTE:', '# hello'])
     ]
 
@@ -926,7 +926,7 @@ def test_convert_node_see_also_section_always_dropped():
 
 def test_convert_node_generic_admonition_uses_title():
     doctree = _parse('.. admonition:: Custom Title\n\n   body text')
-    assert seac._convert_node(doctree[0], _ctx(fmt='py')) == [
+    assert seac._convert_node(doctree[0], _ctx(fmt='python')) == [
         ('directive', ['# Custom Title:', '#     body text'])
     ]
 
@@ -936,7 +936,9 @@ def test_convert_node_generic_admonition_no_title_defaults_to_note():
     p = nodes.paragraph()
     p += nodes.Text('body')
     node += p
-    assert seac._convert_node(node, _ctx(fmt='py')) == [('directive', ['# NOTE:', '#     body'])]
+    assert seac._convert_node(node, _ctx(fmt='python')) == [
+        ('directive', ['# NOTE:', '#     body'])
+    ]
 
 
 def test_convert_node_admonition_with_no_body_keeps_label():
@@ -949,7 +951,7 @@ def test_convert_node_note_with_code_indents_text_not_code():
     # under the label, but the code itself is left flush -- indenting it
     # would be invalid Python (it isn't actually nested inside anything)
     doctree = _parse('.. note::\n\n   See below.\n\n   >>> x = 1')
-    assert seac._convert_node(doctree[0], _ctx(fmt='py')) == [
+    assert seac._convert_node(doctree[0], _ctx(fmt='python')) == [
         ('directive', ['# NOTE:', '#     See below.', 'x = 1'])
     ]
 
@@ -1216,28 +1218,28 @@ _LEVEL_UNDERLINE_CHARS = {1: '=', 2: '-', 3: '~', 4: '^', 5: '"', 6: "'"}
 
 
 @pytest.mark.parametrize('level', [1, 2, 3, 4, 5, 6])
-def test_title_underline_segment_py_uses_level_specific_underline(level):
-    kind, lines = seac._title_underline_segment('A Title', level, 'py')
+def test_title_underline_segment_python_uses_level_specific_underline(level):
+    kind, lines = seac._title_underline_segment('A Title', level, 'python')
     assert kind == 'directive'
     char = _LEVEL_UNDERLINE_CHARS[level]
     assert lines == ['# A Title', '# ' + char * len('A Title')]
 
 
 @pytest.mark.parametrize('level', [1, 2, 3, 4, 5, 6])
-def test_title_underline_segment_ipynb_always_uses_atx(level):
-    kind, lines = seac._title_underline_segment('A Title', level, 'ipynb')
+def test_title_underline_segment_jupyter_always_uses_atx(level):
+    kind, lines = seac._title_underline_segment('A Title', level, 'jupyter')
     assert kind == 'directive'
     assert lines == [f'# {"#" * level} A Title']
 
 
-def test_title_underline_segment_py_level_beyond_6_clamped():
-    kind, lines = seac._title_underline_segment('A Title', 9, 'py')
+def test_title_underline_segment_python_level_beyond_6_clamped():
+    kind, lines = seac._title_underline_segment('A Title', 9, 'python')
     assert kind == 'directive'
     assert lines == ['# A Title', "# '''''''"]
 
 
-def test_title_underline_segment_ipynb_level_beyond_6_clamped():
-    kind, lines = seac._title_underline_segment('A Title', 9, 'ipynb')
+def test_title_underline_segment_jupyter_level_beyond_6_clamped():
+    kind, lines = seac._title_underline_segment('A Title', 9, 'jupyter')
     assert kind == 'directive'
     assert lines == ['# ###### A Title']
 
@@ -1313,30 +1315,30 @@ def _nest_title_one_deep(text: str) -> nodes.title:
 
 def test_convert_node_title_uses_underline_treatment():
     title = _nest_title_one_deep('A subsection')
-    assert seac._convert_node(title, _ctx(fmt='py')) == [
+    assert seac._convert_node(title, _ctx(fmt='python')) == [
         ('directive', ['# A subsection', '# ------------'])
     ]
 
 
-def test_convert_node_title_one_deep_ipynb_uses_atx():
+def test_convert_node_title_one_deep_jupyter_uses_atx():
     title = _nest_title_one_deep('A subsection')
-    assert seac._convert_node(title, _ctx(fmt='ipynb')) == [('directive', ['# ## A subsection'])]
+    assert seac._convert_node(title, _ctx(fmt='jupyter')) == [('directive', ['# ## A subsection'])]
 
 
 def test_convert_node_title_not_nested_uses_level_1():
     section = nodes.section()
     title = nodes.title('', 'A subsection')
     section += title
-    assert seac._convert_node(title, _ctx(fmt='py')) == [
+    assert seac._convert_node(title, _ctx(fmt='python')) == [
         ('directive', ['# A subsection', '# ============'])
     ]
 
 
-def test_convert_node_title_not_nested_ipynb_uses_atx():
+def test_convert_node_title_not_nested_jupyter_uses_atx():
     section = nodes.section()
     title = nodes.title('', 'A subsection')
     section += title
-    assert seac._convert_node(title, _ctx(fmt='ipynb')) == [('directive', ['# # A subsection'])]
+    assert seac._convert_node(title, _ctx(fmt='jupyter')) == [('directive', ['# # A subsection'])]
 
 
 def _nest_title_three_deep(text: str) -> nodes.title:
@@ -1352,16 +1354,16 @@ def _nest_title_three_deep(text: str) -> nodes.title:
     return title
 
 
-def test_convert_node_title_two_sections_deep_py_uses_tilde():
+def test_convert_node_title_two_sections_deep_python_uses_tilde():
     title = _nest_title_three_deep('A sub-subsection')
-    assert seac._convert_node(title, _ctx(fmt='py')) == [
+    assert seac._convert_node(title, _ctx(fmt='python')) == [
         ('directive', ['# A sub-subsection', '# ~~~~~~~~~~~~~~~~'])
     ]
 
 
-def test_convert_node_title_two_sections_deep_ipynb_uses_atx():
+def test_convert_node_title_two_sections_deep_jupyter_uses_atx():
     title = _nest_title_three_deep('A sub-subsection')
-    assert seac._convert_node(title, _ctx(fmt='ipynb')) == [
+    assert seac._convert_node(title, _ctx(fmt='jupyter')) == [
         ('directive', ['# ### A sub-subsection'])
     ]
 
@@ -1384,38 +1386,38 @@ def _footer_app(*, base_url: str | None = None) -> Mock:
 
 
 def test_footer_segment_none_returns_empty():
-    assert seac._footer_segment(None, 'py', _footer_app(), 'page') == []
+    assert seac._footer_segment(None, 'python', _footer_app(), 'page') == []
 
 
 def test_footer_segment_empty_string_returns_empty():
-    assert seac._footer_segment('', 'py', _footer_app(), 'page') == []
+    assert seac._footer_segment('', 'python', _footer_app(), 'page') == []
 
 
 _FOOTER_SEP_LINE = f'# {seac._FOOTER_SEPARATOR}'
 
 
 def test_footer_segment_starts_with_the_separator():
-    segments = seac._footer_segment('Generated file.', 'py', _footer_app(), 'page')
+    segments = seac._footer_segment('Generated file.', 'python', _footer_app(), 'page')
     assert segments[0][1][0] == _FOOTER_SEP_LINE
 
 
 def test_footer_segment_plain_text_single_line():
     # no RST markup at all -- the common case for a custom footer
-    segments = seac._footer_segment('Generated file.', 'py', _footer_app(), 'page')
+    segments = seac._footer_segment('Generated file.', 'python', _footer_app(), 'page')
     assert segments == [('directive', [_FOOTER_SEP_LINE, '# Generated file.'])]
 
 
 def test_footer_segment_plain_text_multiline_becomes_one_comment_per_line():
     # a single newline (no blank line) stays one RST paragraph, with the
     # line break preserved in its text
-    segments = seac._footer_segment('line one\nline two', 'py', _footer_app(), 'page')
+    segments = seac._footer_segment('line one\nline two', 'python', _footer_app(), 'page')
     kind, lines = segments[0]
     assert kind == 'directive'
     assert lines == [_FOOTER_SEP_LINE, '# line one', '# line two']
 
 
 def test_footer_segment_blank_line_separated_paragraphs_both_kept():
-    segments = seac._footer_segment('first\n\nsecond', 'py', _footer_app(), 'page')
+    segments = seac._footer_segment('first\n\nsecond', 'python', _footer_app(), 'page')
     kind, lines = segments[0]
     assert kind == 'directive'
     assert lines == [_FOOTER_SEP_LINE, '# first', '# second']
@@ -1428,48 +1430,48 @@ def test_footer_segment_bare_url_recognized_by_docutils_natively():
     # the label and the target -- an RST hyperlink with its own text (the
     # tests above) reads better, which is why _DEFAULT_FOOTER uses one.
     footer = 'https://example.com/issues'
-    _kind, lines = seac._footer_segment(footer, 'ipynb', _footer_app(), 'page')[0]
+    _kind, lines = seac._footer_segment(footer, 'jupyter', _footer_app(), 'page')[0]
     assert lines == [
         _FOOTER_SEP_LINE,
         '# [https://example.com/issues](https://example.com/issues)',
     ]
 
 
-def test_footer_segment_link_mid_sentence_in_py_stays_inline():
+def test_footer_segment_link_mid_sentence_in_python_stays_inline():
     # a footer link doesn't force its own line -- a link sitting
     # mid-sentence keeps reading as one line
     footer = 'See https://example.com/issues for details.'
-    _kind, lines = seac._footer_segment(footer, 'py', _footer_app(), 'page')[0]
+    _kind, lines = seac._footer_segment(footer, 'python', _footer_app(), 'page')[0]
     assert lines == [
         _FOOTER_SEP_LINE,
         '# See https://example.com/issues https://example.com/issues for details.',
     ]
 
 
-def test_footer_segment_rst_hyperlink_py_shows_text_and_url():
+def test_footer_segment_rst_hyperlink_python_shows_text_and_url():
     # rendered with in_footer=True -- reuses the same resolve/render
     # machinery as "See Also", just without its own-line wrapping
     footer = '`Report issues <https://example.com/issues>`_'
-    _kind, lines = seac._footer_segment(footer, 'py', _footer_app(), 'page')[0]
+    _kind, lines = seac._footer_segment(footer, 'python', _footer_app(), 'page')[0]
     assert lines == [_FOOTER_SEP_LINE, '# Report issues https://example.com/issues']
 
 
-def test_footer_segment_rst_hyperlink_ipynb_becomes_clickable_link():
+def test_footer_segment_rst_hyperlink_jupyter_becomes_clickable_link():
     footer = '`Report issues <https://example.com/issues>`_'
-    _kind, lines = seac._footer_segment(footer, 'ipynb', _footer_app(), 'page')[0]
+    _kind, lines = seac._footer_segment(footer, 'jupyter', _footer_app(), 'page')[0]
     assert lines == [_FOOTER_SEP_LINE, '# [Report issues](https://example.com/issues)']
 
 
-def test_footer_segment_default_footer_py():
-    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'py', _footer_app(), 'page')[0][1]
+def test_footer_segment_default_footer_python():
+    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'python', _footer_app(), 'page')[0][1]
     assert lines == [
         _FOOTER_SEP_LINE,
         '# Generated by sphinx-examples-as-code https://github.com/pyvista/sphinx-examples-as-code',
     ]
 
 
-def test_footer_segment_default_footer_ipynb_links_clickable():
-    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'ipynb', _footer_app(), 'page')[0][1]
+def test_footer_segment_default_footer_jupyter_links_clickable():
+    lines = seac._footer_segment(seac._DEFAULT_FOOTER, 'jupyter', _footer_app(), 'page')[0][1]
     line0 = '# Generated by [sphinx-examples-as-code](https://github.com/pyvista/sphinx-examples-as-code)'
     assert lines == [_FOOTER_SEP_LINE, line0]
     # the repo name is a real link, not just inline code with no link at all
@@ -1477,39 +1479,39 @@ def test_footer_segment_default_footer_ipynb_links_clickable():
 
 
 # ---------------------------------------------------------------------------
-# _write_source / _make_download_node
+# _write_python_script / _make_download_node
 # ---------------------------------------------------------------------------
 
 
-def test_write_source_writes_file_with_32_char_digest(tmp_path: Path):
+def test_write_python_script_writes_file_with_32_char_digest(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
-    rel_path = seac._write_source(app, 'pkg.func', 'x = 1\n')
+    rel_path = seac._write_python_script(app, 'pkg.func', 'x = 1\n')
     digest, filename = rel_path.split('/')
     assert len(digest) == 32
     assert filename == 'pkg_func.py'
     assert (tmp_path / '_downloads' / digest / filename).read_text() == 'x = 1\n'
 
 
-def test_write_source_empty_name_fallback(tmp_path: Path):
+def test_write_python_script_empty_name_fallback(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
-    rel_path = seac._write_source(app, '', 'x = 1\n')
+    rel_path = seac._write_python_script(app, '', 'x = 1\n')
     assert rel_path.endswith('/example.py')
 
 
 def test_make_download_node_single_entry():
-    node = seac._make_download_node([('Download Python source code', 'abc123/foo.py')])
+    node = seac._make_download_node([('Download Python script', 'abc123/foo.py')])
     assert isinstance(node, nodes.paragraph)
 
     reference = node.children[0]
     assert isinstance(reference, addnodes.download_reference)
     assert reference['filename'] == 'abc123/foo.py'
-    assert reference.astext() == 'Download Python source code'
+    assert reference.astext() == 'Download Python script'
 
 
 def test_make_download_node_multiple_entries_separated():
     node = seac._make_download_node(
         [
-            ('Download Python source code', 'abc123/foo.py'),
+            ('Download Python script', 'abc123/foo.py'),
             ('Download Jupyter notebook', 'def456/foo.ipynb'),
         ]
     )
@@ -1612,14 +1614,14 @@ def test_build_notebook_valid_nbformat():
 
 
 # ---------------------------------------------------------------------------
-# _write_notebook
+# _write_jupyter_notebook
 # ---------------------------------------------------------------------------
 
 
-def test_write_notebook_writes_valid_json(tmp_path: Path):
+def test_write_jupyter_notebook_writes_valid_json(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     notebook = seac._build_notebook([('code', ['x = 1'])])
-    rel_path = seac._write_notebook(app, 'pkg.func', notebook)
+    rel_path = seac._write_jupyter_notebook(app, 'pkg.func', notebook)
     digest, filename = rel_path.split('/')
     assert len(digest) == 32
     assert filename == 'pkg_func.ipynb'
@@ -1665,7 +1667,7 @@ def test_process_span_no_code_no_download(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['py', 'ipynb'],
+        ['python', 'jupyter'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1689,7 +1691,7 @@ def test_process_span_code_segment_but_not_real_code(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['py', 'ipynb'],
+        ['python', 'jupyter'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1710,7 +1712,7 @@ def test_process_span_inserts_at_bottom(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['py', 'ipynb'],
+        ['python', 'jupyter'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1731,7 +1733,7 @@ def test_process_span_inserts_at_top(tmp_path: Path):
         heading,
         1,
         'top',
-        ['py', 'ipynb'],
+        ['python', 'jupyter'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1762,7 +1764,7 @@ def test_process_span_never_pulls_in_see_also_outside_the_span(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['py'],
+        ['python'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1787,7 +1789,7 @@ def test_process_span_appends_footer_with_blank_line_before(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['py'],
+        ['python'],
         'Generated footer text.',
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1813,7 +1815,7 @@ def test_process_span_no_footer_configured_omits_it(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['py'],
+        ['python'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1836,7 +1838,7 @@ def test_process_span_footer_in_notebook_is_linkified(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['ipynb'],
+        ['jupyter'],
         'Report to https://example.com/issues',
         seac._DEFAULT_LINK_LABELS,
     )
@@ -1850,10 +1852,12 @@ def test_process_span_footer_in_notebook_is_linkified(tmp_path: Path):
 @pytest.mark.parametrize(
     ('formats', 'expected_extensions'),
     [
-        (['py'], ['.py']),
-        (['ipynb'], ['.ipynb']),
-        (['py', 'ipynb'], ['.py', '.ipynb']),
-        (['ipynb', 'py'], ['.py', '.ipynb']),  # canonical order regardless of config order
+        (['python'], ['.py']),
+        (['jupyter'], ['.ipynb']),
+        (['python', 'jupyter'], ['.py', '.ipynb']),
+        (['jupyter', 'python'], ['.py', '.ipynb']),  # canonical order regardless of config order
+        (['marimo'], ['.marimo.py']),
+        (['marimo', 'python', 'jupyter'], ['.py', '.ipynb', '.marimo.py']),
         ([], []),
     ],
 )
@@ -1892,12 +1896,29 @@ def test_process_span_respects_formats_config(
         assert reference['filename'].endswith(ext)
 
 
+@pytest.mark.parametrize(
+    ('source', 'expected'),
+    [
+        (['from __future__ import annotations\n', 'x = 1'], ['x = 1']),
+        (
+            ['from __future__ import (\n', '    annotations,\n', ')\n', 'x = 1'],
+            ['x = 1'],
+        ),
+        (['x = 1\n', 'from __future__ import annotations'], ['x = 1\n']),
+        (['%matplotlib inline\n', 'from __future__ import annotations'], None),
+        (['from __future__ import annotations; x = 1\n', 'print(x)'], None),
+    ],
+)
+def test_drop_future_imports(source: list[str], expected: list[str] | None):
+    assert seac._drop_future_imports(source) == (source if expected is None else expected)
+
+
 def test_process_span_custom_link_labels_used_in_download_node(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     _doctree, parent, start, end, heading = _build_examples_doctree(
         '.. rubric:: Examples\n\n>>> x = 1'
     )
-    custom_labels = {'py': 'Get the script', 'ipynb': 'Get the notebook'}
+    custom_labels = {'python': 'Get the script', 'jupyter': 'Get the notebook'}
     seac._process_span(
         app,
         'page',
@@ -1907,7 +1928,7 @@ def test_process_span_custom_link_labels_used_in_download_node(tmp_path: Path):
         heading,
         1,
         'bottom',
-        ['py', 'ipynb'],
+        ['python', 'jupyter'],
         None,
         custom_labels,
     )
@@ -1915,7 +1936,7 @@ def test_process_span_custom_link_labels_used_in_download_node(tmp_path: Path):
     text = parent.children[end].astext()
     assert 'Get the script' in text
     assert 'Get the notebook' in text
-    assert 'Download Python source code' not in text
+    assert 'Download Python script' not in text
 
 
 def test_process_doctree_skips_when_no_download_support():
@@ -1936,7 +1957,7 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
     app.builder.download_support = True
     app.config.sphinx_examples_as_code_conf = {
         'link_position': position,
-        'formats': ['py', 'ipynb'],
+        'formats': ['python', 'jupyter'],
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
@@ -2189,7 +2210,7 @@ def test_process_gallery_page_not_a_gallery_page_is_a_no_op(tmp_path: Path):
     doctree = _parse('Some ordinary page\n\nwith a paragraph.')
     original = doctree.pformat()
     seac._process_gallery_page(
-        app, 'page', doctree, 'bottom', ['py', 'ipynb'], None, seac._DEFAULT_LINK_LABELS
+        app, 'page', doctree, 'bottom', ['python', 'jupyter'], None, seac._DEFAULT_LINK_LABELS
     )
     assert doctree.pformat() == original
 
@@ -2204,7 +2225,7 @@ def test_process_gallery_page_header_uses_the_pages_own_title(tmp_path: Path):
         'auto_examples/plot_minimal',
         doctree,
         'bottom',
-        ['py'],
+        ['python'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -2224,7 +2245,7 @@ def test_process_gallery_page_no_title_falls_back_to_examples_from_header(tmp_pa
         'auto_examples/plot_minimal',
         doctree,
         'bottom',
-        ['py'],
+        ['python'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -2241,7 +2262,7 @@ def test_process_gallery_page_strips_furniture_and_inserts_download(tmp_path: Pa
         'auto_examples/plot_minimal',
         doctree,
         'bottom',
-        ['py'],
+        ['python'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -2281,7 +2302,7 @@ def test_process_gallery_page_includes_code_from_sibling_sections(tmp_path: Path
         'auto_examples/plot_multi',
         doctree,
         'bottom',
-        ['py'],
+        ['python'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -2297,7 +2318,7 @@ def test_process_gallery_page_respects_top_position(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     doctree = _build_gallery_doctree()
     seac._process_gallery_page(
-        app, 'plot_minimal', doctree, 'top', ['py'], None, seac._DEFAULT_LINK_LABELS
+        app, 'plot_minimal', doctree, 'top', ['python'], None, seac._DEFAULT_LINK_LABELS
     )
 
     section = next(doctree.findall(nodes.section))
@@ -2314,7 +2335,7 @@ def test_process_gallery_page_no_real_code_strips_furniture_but_no_download(tmp_
         'plot_minimal',
         doctree,
         'bottom',
-        ['py', 'ipynb'],
+        ['python', 'jupyter'],
         None,
         seac._DEFAULT_LINK_LABELS,
     )
@@ -2330,7 +2351,7 @@ def test_process_gallery_page_empty_after_stripping_is_a_no_op(tmp_path: Path):
     doctree = _parse('')
     doctree += _gallery_footer()
     seac._process_gallery_page(
-        app, 'page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+        app, 'page', doctree, 'bottom', ['python'], None, seac._DEFAULT_LINK_LABELS
     )
     assert not any(isinstance(n, addnodes.download_reference) for n in doctree.findall())
 
@@ -2345,7 +2366,7 @@ def test_process_gallery_page_no_wrapping_section_still_works(tmp_path: Path):
     doctree += _gallery_footer()
 
     seac._process_gallery_page(
-        app, 'weird_page', doctree, 'bottom', ['py'], None, seac._DEFAULT_LINK_LABELS
+        app, 'weird_page', doctree, 'bottom', ['python'], None, seac._DEFAULT_LINK_LABELS
     )
 
     written = next((tmp_path / '_downloads').rglob('*.py'))
@@ -2357,7 +2378,7 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
     app.builder.download_support = True
     app.config.sphinx_examples_as_code_conf = {
         'link_position': 'bottom',
-        'formats': ['py'],
+        'formats': ['python'],
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
@@ -2376,7 +2397,7 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
     app.builder.download_support = True
     app.config.sphinx_examples_as_code_conf = {
         'link_position': 'bottom',
-        'formats': ['py'],
+        'formats': ['python'],
         'gallery_downloads': True,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
@@ -2442,16 +2463,16 @@ def test_normalized_html_baseurl_bare_domain_gets_trailing_slash():
 
 def test_coerce_conf_value_non_string_passes_through():
     # already the real type (set directly in conf.py) -- untouched
-    assert seac._coerce_conf_value('formats', ['py']) == ['py']
+    assert seac._coerce_conf_value('formats', ['python']) == ['python']
     assert seac._coerce_conf_value('gallery_downloads', True) is True
 
 
 def test_coerce_conf_value_formats_splits_on_comma():
-    assert seac._coerce_conf_value('formats', 'py,ipynb') == ['py', 'ipynb']
+    assert seac._coerce_conf_value('formats', 'python,jupyter') == ['python', 'jupyter']
 
 
 def test_coerce_conf_value_formats_single_value_no_comma():
-    assert seac._coerce_conf_value('formats', 'py') == ['py']
+    assert seac._coerce_conf_value('formats', 'python') == ['python']
 
 
 @pytest.mark.parametrize(('raw', 'expected'), [('0', False), ('1', True)])
@@ -2484,7 +2505,7 @@ def test_finalize_conf_partial_dict_keeps_the_rest_default():
     seac._finalize_conf(Mock(), config)
     conf = config.sphinx_examples_as_code_conf
     assert conf['link_position'] == 'bottom'
-    assert conf['formats'] == ['py', 'ipynb']
+    assert conf['formats'] == ['python', 'jupyter', 'marimo']
     assert conf['gallery_downloads'] is False
     assert conf['footer'] == seac._DEFAULT_FOOTER
 
@@ -2526,11 +2547,51 @@ def test_finalize_conf_unknown_key_error_lists_valid_keys():
 def test_finalize_conf_coerces_cli_override_style_strings():
     # what a ``-D sphinx_examples_as_code_conf.key=value`` override looks
     # like by the time it reaches config-inited -- see _coerce_conf_value
-    config = Mock(sphinx_examples_as_code_conf={'formats': 'py,ipynb', 'gallery_downloads': '1'})
+    config = Mock(
+        sphinx_examples_as_code_conf={'formats': 'python,jupyter', 'gallery_downloads': '1'}
+    )
     seac._finalize_conf(Mock(), config)
     conf = config.sphinx_examples_as_code_conf
-    assert conf['formats'] == ['py', 'ipynb']
+    assert conf['formats'] == ['python', 'jupyter']
     assert conf['gallery_downloads'] is True
+
+
+def test_finalize_conf_marimo_format_without_marimo_raises(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(seac.importlib.util, 'find_spec', lambda _name: None)
+    config = Mock(sphinx_examples_as_code_conf={'formats': ['python', 'marimo']})
+    with pytest.raises(ConfigError, match=r"includes 'marimo', which needs marimo 0.14 or newer"):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_unknown_format_raises():
+    config = Mock(sphinx_examples_as_code_conf={'formats': ['python', 'pdf']})
+    with pytest.raises(ConfigError, match=r"unknown format\(s\) \['pdf'\]") as excinfo:
+        seac._finalize_conf(Mock(), config)
+    assert 'Renamed' not in str(excinfo.value)
+
+
+def test_finalize_conf_old_format_names_raise_with_new_names():
+    config = Mock(sphinx_examples_as_code_conf={'formats': 'py,ipynb'})
+    with pytest.raises(
+        ConfigError, match=r"Renamed: 'py' is now 'python', 'ipynb' is now 'jupyter'\."
+    ):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_default_formats_skip_marimo_when_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(seac.importlib.util, 'find_spec', lambda _name: None)
+    config = Mock(sphinx_examples_as_code_conf={'link_position': 'bottom'})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['formats'] == ['python', 'jupyter']
+    assert seac._CONF_DEFAULTS['formats'] == ['python', 'jupyter', 'marimo']
+
+
+def test_finalize_conf_marimo_format_with_marimo_installed():
+    config = Mock(sphinx_examples_as_code_conf={'formats': 'python,marimo'})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['formats'] == ['python', 'marimo']
 
 
 def test_finalize_conf_base_url_is_an_unknown_key():
@@ -2546,17 +2607,35 @@ def test_finalize_conf_link_labels_defaults_when_unset():
 
 
 def test_finalize_conf_link_labels_partial_override_keeps_other_default():
-    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'py': 'Get the script'}})
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'python': 'Get the script'}})
     seac._finalize_conf(Mock(), config)
     link_labels = config.sphinx_examples_as_code_conf['link_labels']
-    assert link_labels['py'] == 'Get the script'
-    assert link_labels['ipynb'] == seac._DEFAULT_LINK_LABELS['ipynb']
+    assert link_labels['python'] == 'Get the script'
+    assert link_labels['jupyter'] == seac._DEFAULT_LINK_LABELS['jupyter']
 
 
 def test_finalize_conf_link_labels_not_a_dict_raises():
     config = Mock(sphinx_examples_as_code_conf={'link_labels': 'nope'})
     with pytest.raises(ConfigError, match=r"link_labels'\] must be a dict"):
         seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_link_labels_old_key_names_raise_with_new_names():
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'py': 'Get the script'}})
+    with pytest.raises(ConfigError, match=r"Renamed: 'py' is now 'python'\."):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_marimo_converter_available_without_marimo(monkeypatch: pytest.MonkeyPatch):
+    def find_spec(name):
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(seac.importlib.util, 'find_spec', find_spec)
+    assert seac._marimo_converter_available() is False
+
+
+def test_marimo_converter_available_with_marimo():
+    assert seac._marimo_converter_available() is True
 
 
 def test_finalize_conf_link_labels_unknown_format_key_raises():
@@ -2576,7 +2655,7 @@ def test_finalize_conf_does_not_mutate_the_defaults():
 
 def test_finalize_conf_link_labels_override_does_not_mutate_the_defaults():
     original = dict(seac._DEFAULT_LINK_LABELS)
-    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'py': 'Get the script'}})
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'python': 'Get the script'}})
     seac._finalize_conf(Mock(), config)
     assert original == seac._DEFAULT_LINK_LABELS
 

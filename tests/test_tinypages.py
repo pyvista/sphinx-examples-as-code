@@ -92,12 +92,12 @@ def built(tmp_path_factory) -> tuple[Path, list[Path]]:
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    examples = sorted(downloads_dir.rglob('*.py')) if downloads_dir.is_dir() else []
+    examples = sorted(p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py'))
     return html_dir, examples
 
 
 @pytest.fixture(scope='module')
-def built_notebooks(built: tuple[Path, list[Path]]) -> list[Path]:
+def built_jupyter_notebooks(built: tuple[Path, list[Path]]) -> list[Path]:
     """Reuse the same build as ``built``, listing its generated .ipynb files instead."""
     downloads_dir = built[0] / '_downloads'
     return sorted(downloads_dir.rglob('*.ipynb')) if downloads_dir.is_dir() else []
@@ -211,7 +211,7 @@ def test_docstring_examples_conversion(built: tuple[Path, list[Path]]):
     assert '3' not in combined_src  # doctest output line dropped entirely, not commented
 
 
-def test_table_becomes_an_rst_simple_table_in_py(built: tuple[Path, list[Path]]):
+def test_table_becomes_an_rst_simple_table_in_python(built: tuple[Path, list[Path]]):
     """A table converts to an aligned RST simple table, captioned above it."""
     lines = _read(built[1], 'case_table.py').splitlines()
     start = lines.index('# Line styles')
@@ -226,9 +226,9 @@ def test_table_becomes_an_rst_simple_table_in_py(built: tuple[Path, list[Path]])
     assert 'Example' not in '\n'.join(lines[start : start + 8])
 
 
-def test_table_becomes_a_markdown_table_in_ipynb(built_notebooks: list[Path]):
+def test_table_becomes_a_markdown_table_in_jupyter(built_jupyter_notebooks: list[Path]):
     """The same table is a Markdown pipe table in a notebook's markdown cell."""
-    nb_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_table')
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_table')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     lines = [
         line.rstrip()
@@ -244,10 +244,10 @@ def test_table_becomes_a_markdown_table_in_ipynb(built_notebooks: list[Path]):
     assert lines[start + 5] == '| `"--"` | Dashed      |'
 
 
-def test_header_less_table_gets_a_blank_markdown_header(built_notebooks: list[Path]):
+def test_header_less_table_gets_a_blank_markdown_header(built_jupyter_notebooks: list[Path]):
     """A Markdown pipe table needs a header row, so one is left blank."""
     nb_path = next(
-        p for p in built_notebooks if p.stem == 'docstring_cases_case_table_without_header'
+        p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_table_without_header'
     )
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     lines = [
@@ -299,9 +299,9 @@ def test_header_format(built: tuple[Path, list[Path]]):
     assert lines[2] == ''
 
 
-def test_header_format_ipynb_uses_atx(built_notebooks: list[Path]):
+def test_header_format_jupyter_uses_atx(built_jupyter_notebooks: list[Path]):
     """The same header, in .ipynb, is a single ATX level-1 line -- no underline."""
-    nb_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_note')
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_note')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     header_cell = notebook['cells'][0]
     lines = [line.rstrip() for line in header_cell['source']]
@@ -405,73 +405,80 @@ def test_link_position_config(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_notebook_generated_alongside_py(
-    built: tuple[Path, list[Path]], built_notebooks: list[Path]
+def test_jupyter_notebook_generated_alongside_python(
+    built: tuple[Path, list[Path]], built_jupyter_notebooks: list[Path]
 ):
     """By default, every Examples section gets both a .py and a .ipynb download."""
-    py_names = {p.stem for p in built[1]}
-    ipynb_names = {p.stem for p in built_notebooks}
-    assert py_names
-    assert py_names == ipynb_names
+    python_names = {p.stem for p in built[1]}
+    jupyter_names = {p.stem for p in built_jupyter_notebooks}
+    assert python_names
+    assert python_names == jupyter_names
 
 
-def test_notebook_and_py_links_placed_together(built: tuple[Path, list[Path]]):
+def test_jupyter_notebook_and_python_links_placed_together(built: tuple[Path, list[Path]]):
     """The two download links render in the same paragraph, next to each other."""
     html = (built[0] / 'docstring_cases.html').read_text(encoding='utf-8')
     section_start = html.find('id="docstring_cases.case_note"')
     assert section_start != -1
     snippet = html[section_start : section_start + 800]
-    py_pos = snippet.find('Download Python source code')
-    ipynb_pos = snippet.find('Download Jupyter notebook')
-    assert py_pos != -1
-    assert ipynb_pos != -1
-    between = snippet[py_pos:ipynb_pos]
+    python_pos = snippet.find('Download Python script')
+    jupyter_pos = snippet.find('Download Jupyter notebook')
+    assert python_pos != -1
+    assert jupyter_pos != -1
+    between = snippet[python_pos:jupyter_pos]
     assert '</p>' not in between  # both links are in the same paragraph
     assert ' | ' in between
 
 
-def test_notebook_is_valid_nbformat(built_notebooks: list[Path]):
+def test_jupyter_notebook_is_valid_nbformat(built_jupyter_notebooks: list[Path]):
     """Every generated .ipynb should be a well-formed, valid notebook."""
-    assert built_notebooks
-    for path in built_notebooks:
+    assert built_jupyter_notebooks
+    for path in built_jupyter_notebooks:
         node = nbformat.read(path, as_version=4)
         nbformat.validate(node)
 
 
-def test_notebook_code_cells_match_py_code(
-    built: tuple[Path, list[Path]], built_notebooks: list[Path]
+def test_jupyter_notebook_code_cells_match_python_code(
+    built: tuple[Path, list[Path]], built_jupyter_notebooks: list[Path]
 ):
     """A notebook's code cells, concatenated, should match the .py file's code lines.
 
     Confirms the cell-splitting doesn't drop or duplicate any code -- only
     reorganizes prose/directives into separate markdown cells around it.
     """
-    py_src = _read(built[1], 'case_combined')
-    py_code_lines = [line for line in py_src.splitlines() if line and not line.startswith('#')]
+    python_src = _read(built[1], 'case_combined')
+    python_code_lines = [
+        line for line in python_src.splitlines() if line and not line.startswith('#')
+    ]
 
-    notebook_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_combined')
+    notebook_path = next(
+        p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_combined'
+    )
     notebook = json.loads(notebook_path.read_text(encoding='utf-8'))
     code_cells = [c for c in notebook['cells'] if c['cell_type'] == 'code']
     notebook_code_lines = [
         line.rstrip('\n') for cell in code_cells for line in cell['source'] if line.strip()
     ]
 
-    assert notebook_code_lines == py_code_lines
+    assert notebook_code_lines == python_code_lines
 
 
 @pytest.mark.parametrize(
-    ('formats', 'expect_py', 'expect_ipynb'),
+    ('formats', 'expect_python', 'expect_jupyter', 'expect_marimo'),
     [
-        ('py', True, False),
-        ('ipynb', False, True),
-        ('py,ipynb', True, True),
+        ('python', True, False, False),
+        ('jupyter', False, True, False),
+        ('python,jupyter', True, True, False),
+        ('marimo', False, False, True),
+        ('python,jupyter,marimo', True, True, True),
     ],
 )
 def test_formats_config_selection(
     tmp_path: Path,
     formats: str,
-    expect_py: bool,
-    expect_ipynb: bool,
+    expect_python: bool,
+    expect_jupyter: bool,
+    expect_marimo: bool,
 ):
     """``sphinx_examples_as_code_conf['formats']`` controls which download(s) get generated."""
     html_dir = tmp_path / 'html'
@@ -487,15 +494,18 @@ def test_formats_config_selection(
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    py_files = list(downloads_dir.rglob('*.py'))
-    ipynb_files = list(downloads_dir.rglob('*.ipynb'))
+    marimo_files = list(downloads_dir.rglob('*.marimo.py'))
+    python_files = [p for p in downloads_dir.rglob('*.py') if p not in marimo_files]
+    jupyter_files = list(downloads_dir.rglob('*.ipynb'))
 
-    assert bool(py_files) == expect_py
-    assert bool(ipynb_files) == expect_ipynb
+    assert bool(python_files) == expect_python
+    assert bool(jupyter_files) == expect_jupyter
+    assert bool(marimo_files) == expect_marimo
 
     html = (html_dir / 'docstring_cases.html').read_text(encoding='utf-8')
-    assert ('Download Python source code' in html) == expect_py
-    assert ('Download Jupyter notebook' in html) == expect_ipynb
+    assert ('Download Python script' in html) == expect_python
+    assert ('Download Jupyter notebook' in html) == expect_jupyter
+    assert ('Download marimo notebook' in html) == expect_marimo
 
 
 # ---------------------------------------------------------------------------
@@ -504,14 +514,16 @@ def test_formats_config_selection(
 
 
 def test_base_url_unset_no_links_anywhere(
-    built: tuple[Path, list[Path]], built_notebooks: list[Path]
+    built: tuple[Path, list[Path]], built_jupyter_notebooks: list[Path]
 ):
     """Default (``html_baseurl`` unset): no links anywhere, in either format."""
-    py_src = _read(built[1], 'case_regular_xref_for_base_url')
-    assert 'http' not in py_src
+    python_src = _read(built[1], 'case_regular_xref_for_base_url')
+    assert 'http' not in python_src
 
     nb_path = next(
-        p for p in built_notebooks if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
+        p
+        for p in built_jupyter_notebooks
+        if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
     )
     nb_text = nb_path.read_text(encoding='utf-8')
     assert 'http' not in nb_text
@@ -541,16 +553,16 @@ def test_base_url_set_resolves_links(tmp_path: Path):
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    py_files = list(downloads_dir.rglob('*.py'))
-    ipynb_files = list(downloads_dir.rglob('*.ipynb'))
+    python_files = [p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py')]
+    jupyter_files = list(downloads_dir.rglob('*.ipynb'))
 
     # a regular reference: link resolved in .ipynb, omitted in .py
-    regular_py = _read(py_files, 'case_regular_xref_for_base_url')
-    assert 'http' not in regular_py
-    assert '`docstring_cases.Sample`' in regular_py
+    regular_python = _read(python_files, 'case_regular_xref_for_base_url')
+    assert 'http' not in regular_python
+    assert '`docstring_cases.Sample`' in regular_python
 
     regular_nb = next(
-        p for p in ipynb_files if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
+        p for p in jupyter_files if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
     ).read_text(encoding='utf-8')
     assert '[`docstring_cases.Sample`](https://docs.example.com/' in regular_nb
 
@@ -580,7 +592,7 @@ def test_see_also_always_dropped_in_every_form(built: tuple[Path, list[Path]]):
         assert 'docstring_cases.Sample' not in src
 
 
-def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
+def test_markdown_cells_use_hard_line_breaks(built_jupyter_notebooks: list[Path]):
     """Adjacent lines within one markdown cell need an explicit hard break.
 
     Without it, markdown treats a single newline as whitespace and runs
@@ -589,7 +601,7 @@ def test_markdown_cells_use_hard_line_breaks(built_notebooks: list[Path]):
     with no blank line between -- not the header cell, which is a single
     ATX heading line with nothing else to connect to.
     """
-    nb_path = next(p for p in built_notebooks if p.stem == 'docstring_cases_case_note')
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_note')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     note_cell = next(
         c
@@ -652,32 +664,32 @@ def test_base_url_missing_trailing_slash_still_resolves_subpath(tmp_path: Path):
 # sphinx_examples_as_code_conf['footer']
 # ---------------------------------------------------------------------------
 
-_DEFAULT_FOOTER_PY_LINES = (
+_DEFAULT_FOOTER_PYTHON_LINES = (
     '# Generated by sphinx-examples-as-code https://github.com/pyvista/sphinx-examples-as-code',
 )
-_DEFAULT_FOOTER_IPYNB_LINK = (
+_DEFAULT_FOOTER_JUPYTER_LINK = (
     '[sphinx-examples-as-code](https://github.com/pyvista/sphinx-examples-as-code)'
 )
 
 
-def test_default_footer_appears_in_py(tmp_path: Path):
+def test_default_footer_appears_in_python(tmp_path: Path):
     """With nothing overridden, the default footer is appended -- this is a real default."""
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(_sphinx_build_cmd(SRCDIR, html_dir, doctree_dir))
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
-    py_path = next((html_dir / '_downloads').rglob('*case_note*.py'))
-    lines = py_path.read_text(encoding='utf-8').splitlines()
+    python_path = next((html_dir / '_downloads').rglob('*case_note.py'))
+    lines = python_path.read_text(encoding='utf-8').splitlines()
     sep_line = f'# {seac._FOOTER_SEPARATOR}'
     sep_idx = lines.index(sep_line)
     assert lines[sep_idx - 1] == ''  # blank line before the footer's separator
-    assert lines[sep_idx + 1 : sep_idx + 1 + len(_DEFAULT_FOOTER_PY_LINES)] == list(
-        _DEFAULT_FOOTER_PY_LINES
+    assert lines[sep_idx + 1 : sep_idx + 1 + len(_DEFAULT_FOOTER_PYTHON_LINES)] == list(
+        _DEFAULT_FOOTER_PYTHON_LINES
     )
 
 
-def test_default_footer_appears_in_ipynb_with_clickable_links(tmp_path: Path):
+def test_default_footer_appears_in_jupyter_with_clickable_links(tmp_path: Path):
     html_dir = tmp_path / 'html'
     doctree_dir = tmp_path / 'doctrees'
     returncode, out, err = _run_sphinx_build(_sphinx_build_cmd(SRCDIR, html_dir, doctree_dir))
@@ -686,14 +698,14 @@ def test_default_footer_appears_in_ipynb_with_clickable_links(tmp_path: Path):
     nb_path = next((html_dir / '_downloads').rglob('*case_note*.ipynb'))
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     all_source = ''.join(''.join(cell['source']) for cell in notebook['cells'])
-    assert _DEFAULT_FOOTER_IPYNB_LINK in all_source
+    assert _DEFAULT_FOOTER_JUPYTER_LINK in all_source
     # the repo name reads as a real link, not inline code with no link at all
     assert '`sphinx-examples-as-code`' not in all_source
     # .py's plain "text url" form (no markdown link syntax) shouldn't appear here
     assert 'Generated by sphinx-examples-as-code https://' not in all_source
 
 
-def test_default_footer_is_its_own_dedicated_ipynb_cell(tmp_path: Path):
+def test_default_footer_is_its_own_dedicated_jupyter_cell(tmp_path: Path):
     """The footer always gets its own markdown cell, never sharing one.
 
     ``case_note``'s Examples section ends with a ``.. note::``, markdown
@@ -711,7 +723,7 @@ def test_default_footer_is_its_own_dedicated_ipynb_cell(tmp_path: Path):
     nb_path = next((html_dir / '_downloads').rglob('*case_note*.ipynb'))
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     footer_cell = next(
-        c for c in notebook['cells'] if _DEFAULT_FOOTER_IPYNB_LINK in ''.join(c['source'])
+        c for c in notebook['cells'] if _DEFAULT_FOOTER_JUPYTER_LINK in ''.join(c['source'])
     )
     lines = [line.rstrip() for line in footer_cell['source']]
     assert lines[0] == seac._FOOTER_SEPARATOR
@@ -741,7 +753,7 @@ def test_footer_custom_string(tmp_path: Path):
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
-    py_path = next((html_dir / '_downloads').rglob('*case_note*.py'))
-    content = py_path.read_text(encoding='utf-8')
+    python_path = next((html_dir / '_downloads').rglob('*case_note.py'))
+    content = python_path.read_text(encoding='utf-8')
     assert '# Custom footer text.' in content
     assert 'sphinx-examples-as-code' not in content
