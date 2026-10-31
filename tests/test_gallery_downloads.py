@@ -116,7 +116,7 @@ def gallery_build(tmp_path_factory) -> tuple[Path, str]:
     """Build once with the feature enabled; shared by every enabled-mode test below."""
     tmp_path = tmp_path_factory.mktemp('sphinx_examples_as_code_gallery_build')
     returncode, out, err, html_dir = _build(
-        tmp_path, gallery_downloads=True, formats='py,ipynb,marimo'
+        tmp_path, gallery_downloads=True, formats='python,jupyter,marimo'
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
     html = (html_dir / 'auto_examples' / 'plot_minimal.html').read_text(encoding='utf-8')
@@ -141,7 +141,7 @@ def test_gallery_downloads_enabled_keeps_timing_and_signature_on_page(
 
 def test_gallery_downloads_enabled_inserts_our_own_links(gallery_build: tuple[Path, str]):
     _html_dir, html = gallery_build
-    assert 'Download Python source code' in html
+    assert 'Download Python script' in html
     assert 'Download Jupyter notebook' in html
     assert 'Download marimo notebook' in html
 
@@ -152,7 +152,7 @@ def _generated(html_dir: Path, suffix: str) -> Path:
     return matches[0]
 
 
-def test_gallery_downloads_py_content(gallery_build: tuple[Path, str]):
+def test_gallery_downloads_python_content(gallery_build: tuple[Path, str]):
     html_dir, _html = gallery_build
     src = _generated(html_dir, '.py').read_text(encoding='utf-8')
 
@@ -201,7 +201,7 @@ def test_gallery_downloads_sibling_section_heading_is_set_off(gallery_build: tup
     assert lines[heading_idx + 2] == ''  # blank line after the heading
 
 
-def test_gallery_downloads_ipynb_is_valid(gallery_build: tuple[Path, str]):
+def test_gallery_downloads_jupyter_is_valid(gallery_build: tuple[Path, str]):
     html_dir, _html = gallery_build
     nb_path = _generated(html_dir, '.ipynb')
     node = nbformat.read(nb_path, as_version=4)
@@ -214,7 +214,9 @@ def test_gallery_downloads_ipynb_is_valid(gallery_build: tuple[Path, str]):
     assert 'z = 3' in all_source  # from the sibling ("# %%" headed) section
 
 
-def test_gallery_downloads_footer_is_its_own_dedicated_ipynb_cell(gallery_build: tuple[Path, str]):
+def test_gallery_downloads_footer_is_its_own_dedicated_jupyter_cell(
+    gallery_build: tuple[Path, str],
+):
     """The footer always gets its own markdown cell -- here, following a code cell.
 
     See ``test_tinypages.py`` for the harder case, where the footer directly
@@ -228,7 +230,7 @@ def test_gallery_downloads_footer_is_its_own_dedicated_ipynb_cell(gallery_build:
     assert first_line == seac._FOOTER_SEPARATOR
 
 
-def test_gallery_downloads_sibling_section_heading_is_markdown_in_ipynb(
+def test_gallery_downloads_sibling_section_heading_is_markdown_in_jupyter(
     gallery_build: tuple[Path, str],
 ):
     """The sibling section's heading is a level-2 (``##``) Markdown heading."""
@@ -255,16 +257,16 @@ def test_gallery_downloads_page_title_is_level_1_sibling_heading_is_level_2(
     assert '## A minimal gallery example' not in lines
 
 
-def test_gallery_downloads_generated_py_executes(gallery_build: tuple[Path, str]):
+def test_gallery_downloads_generated_python_executes(gallery_build: tuple[Path, str]):
     """The key correctness check: the generated script must actually run."""
     html_dir, _html = gallery_build
-    py_path = _generated(html_dir, '.py')
+    python_path = _generated(html_dir, '.py')
     result = subprocess.run(
-        [sys.executable, str(py_path)],
+        [sys.executable, str(python_path)],
         capture_output=True,
         text=True,
         timeout=60,
-        cwd=py_path.parent,
+        cwd=python_path.parent,
         check=False,
     )
     assert result.returncode == 0, f'{result.stdout}\n{result.stderr}'
