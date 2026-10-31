@@ -90,7 +90,8 @@ sphinx_examples_as_code_conf = {
   `{'jupyter': ['pyvista[jupyter]']}`. An entry naming a detected project replaces it,
   so `{'python': ['pyvista>=0.46']}` pins a version.
 - `requires_python`: a `requires-python` specifier for the dependency block, e.g.
-  `'>=3.10'`. `None` (default) leaves it out.
+  `'>=3.10'`. `None` (default) derives an upper bound instead; see
+  [Dependencies and run commands](#dependencies-and-run-commands).
 
 An unrecognized key raises a configuration error at build start.
 
@@ -109,15 +110,23 @@ imports, plus any `dependencies` set for its format, and says how to run it:
 
 - Python scripts start with a [PEP 723](https://peps.python.org/pep-0723/) `# /// script`
   block, followed by `# Run this script with: uv run <name>.py`.
-- Jupyter notebooks say `` Open this notebook with: `uvx --from jupyterlab --with <dependency> ... jupyter-lab <name>.ipynb` `` in their first cell.
+- Jupyter notebooks say `` Open this notebook with: `uvx --python '<requires-python>' --from jupyterlab --with <dependency> ... jupyter-lab <name>.ipynb` `` in their first cell.
 - marimo notebooks start with the same `# /// script` block, which also lists `marimo`,
   followed by `# Open this notebook with: uvx marimo edit --sandbox <name>.marimo.py`.
+- Each run command is followed by a line linking to
+  [uv's installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
 Imports are read from the code, not run. Each imported top-level module maps to the
 project that provides it in the environment building the docs; standard-library
 modules, relative imports and modules no single installed project provides are left
 out. Projects the code needs but never imports, such as an optional backend, go in
 `dependencies`.
+
+Unless `requires_python` is set, the block's `requires-python` is `<3.N`, one minor
+version above the newest Python every listed dependency names in its `Programming
+Language :: Python :: 3.X` classifiers, as installed in the environment building the
+docs. Dependencies without such classifiers don't count; with none left, the line is
+left out.
 
 ## Conversion rules
 

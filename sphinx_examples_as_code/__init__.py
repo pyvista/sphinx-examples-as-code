@@ -1047,6 +1047,25 @@ def _script_dependencies(source: str, extra: list[str]) -> list[str]:
     return [deps[key] for key in sorted(deps)]
 
 
+_UV_INSTALL_LINE = 'Install uv first: https://docs.astral.sh/uv/getting-started/installation/'
+
+_PYTHON_CLASSIFIER = re.compile(r'Programming Language :: Python :: 3\.(\d+)$')
+
+
+def _python_upper_bound(deps: list[str]) -> str | None:
+    """Return ``<3.N`` just above the newest Python every classified dependency supports."""
+    newest = []
+    for dep in deps:
+        try:
+            classifiers = importlib.metadata.metadata(_canonical_name(dep)).get_all('Classifier')
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        minors = [int(m[1]) for c in classifiers or [] if (m := _PYTHON_CLASSIFIER.match(c))]
+        if minors:
+            newest.append(max(minors))
+    return f'<3.{min(newest) + 1}' if newest else None
+
+
 def _script_metadata_header(deps: list[str], requires_python: str | None, run_line: str) -> str:
     """Build a PEP 723 ``# /// script`` block followed by a one-line run instruction."""
     lines = ['# /// script']
@@ -1058,14 +1077,16 @@ def _script_metadata_header(deps: list[str], requires_python: str | None, run_li
         lines.append('# ]')
     else:
         lines.append('# dependencies = []')
-    lines.extend(['# ///', f'# {run_line}', ''])
+    lines.extend(['# ///', f'# {run_line}', f'# {_UV_INSTALL_LINE}', ''])
     return '\n'.join(lines) + '\n'
 
 
-def _jupyter_run_line(deps: list[str], filename: str) -> str:
+def _jupyter_run_line(deps: list[str], requires_python: str | None, filename: str) -> str:
     """Build the one-line command that opens a generated notebook with its dependencies."""
+    python_arg = f' --python {shlex.quote(requires_python)}' if requires_python else ''
     with_args = ''.join(f' --with {shlex.quote(dep)}' for dep in deps)
-    return f'Open this notebook with: `uvx --from jupyterlab{with_args} jupyter-lab {filename}`'
+    command = f'uvx{python_arg} --from jupyterlab{with_args} jupyter-lab {filename}'
+    return f'Open this notebook with: `{command}`'
 
 
 #: Default download link text per format -- see ``sphinx_examples_as_code_conf['link_labels']``.
@@ -1161,7 +1182,7 @@ def _build_download_entries(
         jupyter_ctx = _RenderContext(app=app, docname=docname, fmt=_FMT_JUPYTER)
         jupyter_segments = _build_segments(nodes_in_span, jupyter_ctx)
         jupyter_header = _title_underline_segment(header_title, 1, _FMT_JUPYTER)
-        run_segments = [('text', [f'# {run_line}'])] if run_line else []
+        run_segments = [('text', [f'# {run_line}', f'# {_UV_INSTALL_LINE}'])] if run_line else []
         # Converted separately from the footer and concatenated, rather
         # than joined into one segment list and converted together --
         # the footer always gets its own dedicated cell this way.
@@ -1169,10 +1190,13 @@ def _build_download_entries(
         cells.extend(_segments_to_cells(_footer_segment(footer, _FMT_JUPYTER, app, docname)))
         return _build_notebook(cells)
 
+    def requires_python_for(fmt: str) -> str | None:
+        return script_metadata['requires_python'] or _python_upper_bound(deps[fmt])
+
     def header_for(fmt: str, run_line: str) -> str:
         if not deps:
             return ''
-        return _script_metadata_header(deps[fmt], script_metadata['requires_python'], run_line)
+        return _script_metadata_header(deps[fmt], requires_python_for(fmt), run_line)
 
     entries = []
     for fmt in _FORMAT_ORDER:
@@ -1185,7 +1209,9 @@ def _build_download_entries(
             rel_path = _write_python_script(app, name, header + source)
         elif fmt == _FMT_JUPYTER:
             filename = _download_filename(name, 'ipynb')
-            run_line = _jupyter_run_line(deps[fmt], filename) if deps else None
+            run_line = (
+                _jupyter_run_line(deps[fmt], requires_python_for(fmt), filename) if deps else None
+            )
             rel_path = _write_jupyter_notebook(app, name, notebook_for(run_line))
         else:
             filename = _download_filename(name, 'marimo.py')

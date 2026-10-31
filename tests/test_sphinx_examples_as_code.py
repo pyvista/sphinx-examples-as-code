@@ -2821,20 +2821,70 @@ def test_script_metadata_header():
         '# ]\n'
         '# ///\n'
         '# Run this script with: x\n'
+        '# Install uv first: https://docs.astral.sh/uv/getting-started/installation/\n'
         '\n'
     )
 
 
+def _fake_metadata(classifiers: dict[str, list[str]]):
+    def metadata(name: str) -> Mock:
+        if name not in classifiers:
+            raise seac.importlib.metadata.PackageNotFoundError(name)
+        return Mock(get_all=lambda _key: classifiers[name])
+
+    return metadata
+
+
+def test_python_upper_bound_takes_lowest_newest_version(monkeypatch: pytest.MonkeyPatch):
+    classifiers = {
+        'pyvista': [f'Programming Language :: Python :: 3.{n}' for n in range(10, 15)],
+        'numpy': ['Programming Language :: Python :: 3', 'Programming Language :: Python :: 3.15'],
+        'vtk': None,
+    }
+    monkeypatch.setattr(seac.importlib.metadata, 'metadata', _fake_metadata(classifiers))
+    assert seac._python_upper_bound(['numpy', 'PyVista[jupyter]', 'vtk', 'missing']) == '<3.15'
+
+
+def test_python_upper_bound_none_without_classifiers(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(seac.importlib.metadata, 'metadata', _fake_metadata({'vtk': []}))
+    assert seac._python_upper_bound(['vtk', 'missing']) is None
+
+
+def test_script_metadata_derives_requires_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    classifiers = {'numpy': ['Programming Language :: Python :: 3.14']}
+    monkeypatch.setattr(seac.importlib.metadata, 'metadata', _fake_metadata(classifiers))
+    app = Mock(outdir=str(tmp_path))
+    app.builder.download_support = True
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'script_metadata': True,
+    }
+    seac._process_doctree(app, _parse('.. rubric:: Examples\n\n>>> import numpy'), 'page')
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert '# requires-python = "<3.15"\n' in written.read_text(encoding='utf-8')
+
+
 def test_script_metadata_header_no_dependencies():
     header = seac._script_metadata_header([], None, 'run')
-    assert header == '# /// script\n# dependencies = []\n# ///\n# run\n\n'
+    assert header == (
+        f'# /// script\n# dependencies = []\n# ///\n# run\n# {seac._UV_INSTALL_LINE}\n\n'
+    )
 
 
 def test_jupyter_run_line_quotes_extras():
-    line = seac._jupyter_run_line(['numpy', 'pyvista[jupyter]'], 'x.ipynb')
+    line = seac._jupyter_run_line(['numpy', 'pyvista[jupyter]'], None, 'x.ipynb')
     assert line == (
         'Open this notebook with: `uvx --from jupyterlab --with numpy '
         "--with 'pyvista[jupyter]' jupyter-lab x.ipynb`"
+    )
+
+
+def test_jupyter_run_line_passes_requires_python():
+    line = seac._jupyter_run_line(['numpy'], '<3.15', 'x.ipynb')
+    assert line == (
+        "Open this notebook with: `uvx --python '<3.15' --from jupyterlab --with numpy "
+        'jupyter-lab x.ipynb`'
     )
 
 
@@ -2866,7 +2916,8 @@ def test_script_metadata_python(tmp_path: Path):
     name, source = _write_with_metadata(tmp_path, ['python'])
     assert source.startswith(
         '# /// script\n# requires-python = ">=3.10"\n# dependencies = [\n#     "numpy",\n# ]\n'
-        f'# ///\n# Run this script with: uv run {name}\n\n# Examples from page-example-1\n'
+        f'# ///\n# Run this script with: uv run {name}\n# {seac._UV_INSTALL_LINE}\n\n'
+        '# Examples from page-example-1\n'
     )
 
 
@@ -2877,9 +2928,10 @@ def test_script_metadata_jupyter(tmp_path: Path):
         '# Examples from page-example-1',
         '',
         (
-            'Open this notebook with: `uvx --from jupyterlab --with ipywidgets --with numpy '
-            f'jupyter-lab {name}`'
+            "Open this notebook with: `uvx --python '>=3.10' --from jupyterlab "
+            f'--with ipywidgets --with numpy jupyter-lab {name}`'
         ),
+        seac._UV_INSTALL_LINE,
     ]
 
 
@@ -2888,7 +2940,8 @@ def test_script_metadata_marimo(tmp_path: Path):
     header = (
         '# /// script\n# requires-python = ">=3.10"\n# dependencies = [\n'
         '#     "marimo",\n#     "numpy",\n# ]\n'
-        f'# ///\n# Open this notebook with: uvx marimo edit --sandbox {name}\n\n'
+        f'# ///\n# Open this notebook with: uvx marimo edit --sandbox {name}\n'
+        f'# {seac._UV_INSTALL_LINE}\n\n'
     )
     assert source.startswith(header)
     assert 'Open this notebook' not in source.removeprefix(header)
