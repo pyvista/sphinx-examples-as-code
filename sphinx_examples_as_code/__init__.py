@@ -1288,7 +1288,7 @@ _DEFAULT_FOOTER = (
 #: start rather than silently doing nothing.
 _CONF_DEFAULTS: dict[str, object] = {
     'link_position': 'top',
-    'formats': ['python', 'jupyter'],
+    'formats': ['python', 'jupyter', 'marimo'],
     'gallery_downloads': False,
     'footer': _DEFAULT_FOOTER,
     'link_labels': _DEFAULT_LINK_LABELS,
@@ -1380,6 +1380,10 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
     _validate_formats(merged['formats'])
     if 'marimo' in merged['formats'] and importlib.util.find_spec('marimo') is None:
+        if 'formats' not in user_conf:
+            merged['formats'] = [fmt for fmt in merged['formats'] if fmt != 'marimo']
+            config.sphinx_examples_as_code_conf = merged
+            return
         msg = (
             "sphinx_examples_as_code_conf['formats'] includes 'marimo', but marimo is not "
             "installed. Install it with: pip install 'sphinx-examples-as-code[marimo]'"

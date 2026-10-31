@@ -92,7 +92,7 @@ def built(tmp_path_factory) -> tuple[Path, list[Path]]:
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    examples = sorted(downloads_dir.rglob('*.py')) if downloads_dir.is_dir() else []
+    examples = sorted(p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py'))
     return html_dir, examples
 
 
@@ -549,7 +549,7 @@ def test_base_url_set_resolves_links(tmp_path: Path):
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    python_files = list(downloads_dir.rglob('*.py'))
+    python_files = [p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py')]
     jupyter_files = list(downloads_dir.rglob('*.ipynb'))
 
     # a regular reference: link resolved in .ipynb, omitted in .py
@@ -675,7 +675,7 @@ def test_default_footer_appears_in_python(tmp_path: Path):
     returncode, out, err = _run_sphinx_build(_sphinx_build_cmd(SRCDIR, html_dir, doctree_dir))
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
-    python_path = next((html_dir / '_downloads').rglob('*case_note*.py'))
+    python_path = next((html_dir / '_downloads').rglob('*case_note.py'))
     lines = python_path.read_text(encoding='utf-8').splitlines()
     sep_line = f'# {seac._FOOTER_SEPARATOR}'
     sep_idx = lines.index(sep_line)
@@ -749,7 +749,7 @@ def test_footer_custom_string(tmp_path: Path):
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
-    python_path = next((html_dir / '_downloads').rglob('*case_note*.py'))
+    python_path = next((html_dir / '_downloads').rglob('*case_note.py'))
     content = python_path.read_text(encoding='utf-8')
     assert '# Custom footer text.' in content
     assert 'sphinx-examples-as-code' not in content

@@ -2501,7 +2501,7 @@ def test_finalize_conf_partial_dict_keeps_the_rest_default():
     seac._finalize_conf(Mock(), config)
     conf = config.sphinx_examples_as_code_conf
     assert conf['link_position'] == 'bottom'
-    assert conf['formats'] == ['python', 'jupyter']
+    assert conf['formats'] == ['python', 'jupyter', 'marimo']
     assert conf['gallery_downloads'] is False
     assert conf['footer'] == seac._DEFAULT_FOOTER
 
@@ -2572,6 +2572,16 @@ def test_finalize_conf_old_format_names_raise_with_new_names():
         ConfigError, match=r"Renamed: 'py' is now 'python', 'ipynb' is now 'jupyter'\."
     ):
         seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_default_formats_skip_marimo_when_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(seac.importlib.util, 'find_spec', lambda _name: None)
+    config = Mock(sphinx_examples_as_code_conf={'link_position': 'bottom'})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['formats'] == ['python', 'jupyter']
+    assert seac._CONF_DEFAULTS['formats'] == ['python', 'jupyter', 'marimo']
 
 
 def test_finalize_conf_marimo_format_with_marimo_installed():
