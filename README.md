@@ -1,7 +1,8 @@
 # sphinx-examples-as-code
 
 A Sphinx extension that turns docstring/page "Examples" sections into downloadable,
-runnable `.py` and/or `.ipynb` files, with a download link inserted into the section.
+runnable `.py`, `.ipynb` and/or [marimo](https://marimo.io) notebook files, with a download
+link inserted into the section.
 
 Pages or docstrings without an Examples section are left completely untouched. Adding
 `sphinx_examples_as_code` to `conf.py`'s `extensions` is the only on/off switch.
@@ -17,6 +18,12 @@ Sphinx-Gallery integration is opt-in and needs a compatible sphinx-gallery, whic
 
 ```bash
 pip install 'sphinx-examples-as-code[gallery]'
+```
+
+marimo notebook downloads are opt-in too and need marimo, which the `marimo` extra installs:
+
+```bash
+pip install 'sphinx-examples-as-code[marimo]'
 ```
 
 Add it to your Sphinx `conf.py`:
@@ -45,14 +52,17 @@ sphinx_examples_as_code_conf = {
     'link_labels': {
         'py': 'Download Python source code',
         'ipynb': 'Download Jupyter notebook',
+        'marimo': 'Download marimo notebook',
     },
 }
 ```
 
 - `link_position`: where the download link(s) land within the Examples section. `'top'`
   (default) or `'bottom'`.
-- `formats`: which downloads to generate. A list containing `'py'`, `'ipynb'`, or both
-  (default). Always offered in that order regardless of how the list is written.
+- `formats`: which downloads to generate. A list containing any of `'py'`, `'ipynb'` and
+  `'marimo'`; defaults to `['py', 'ipynb']`. Always offered in that order regardless of how
+  the list is written. `'marimo'` needs marimo installed, or the build stops with a
+  configuration error.
 - `link_labels`: the text of the download link(s) themselves, per format. Set only the
   format(s) you want to change; any left unset keep reading their own default shown above.
 - `gallery_downloads`: opt-in takeover of
@@ -119,6 +129,10 @@ blank lines on both sides.
 
 Generated `.ipynb` notebooks use the same content, split into alternating code/markdown
 cells instead.
+
+Generated marimo notebooks (`<name>.marimo.py`) are that same `.ipynb` notebook converted
+by marimo's own converter, the one behind `marimo convert`. `from __future__` imports are
+dropped first, since marimo cells cannot hold them.
 
 A download link is only added if the resulting code contains at least one real
 executable statement.

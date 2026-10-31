@@ -1,4 +1,4 @@
-"""Generate downloadable Python/Jupyter files from docstring "Examples" sections.
+"""Generate downloadable Python/Jupyter/marimo files from docstring "Examples" sections.
 
 See the README for configuration options and the full conversion rules.
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -942,14 +943,33 @@ def _write_notebook(app: Sphinx, name: str, notebook: dict) -> str:
     return _write_download_file(app, name, 'ipynb', json.dumps(notebook, indent=1))
 
 
+_FUTURE_IMPORT_RE = re.compile(r'^from __future__ import .*\n?$')
+
+
+def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict) -> str:
+    """Convert a generated notebook with marimo's own converter and write it as ``.marimo.py``."""
+    from marimo._convert.converters import MarimoConvert
+
+    # A marimo cell is a function body, where a __future__ import is a SyntaxError.
+    cells = [
+        {**cell, 'source': [line for line in cell['source'] if not _FUTURE_IMPORT_RE.match(line)]}
+        if cell['cell_type'] == 'code'
+        else cell
+        for cell in notebook['cells']
+    ]
+    source = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells})).to_py()
+    return _write_download_file(app, name, 'marimo.py', source)
+
+
 #: Default download link text per format -- see ``sphinx_examples_as_code_conf['link_labels']``.
 _DEFAULT_LINK_LABELS = {
     'py': 'Download Python source code',
     'ipynb': 'Download Jupyter notebook',
+    'marimo': 'Download marimo notebook',
 }
 #: The fixed order formats are offered in, regardless of how
 #: ``sphinx_examples_as_code_conf['formats']`` lists them.
-_FORMAT_ORDER = ('py', 'ipynb')
+_FORMAT_ORDER = ('py', 'ipynb', 'marimo')
 
 
 def _make_download_node(entries: list[tuple[str, str]]) -> nodes.paragraph:
@@ -992,7 +1012,7 @@ def _build_download_entries(
     footer: str | None,
     link_labels: dict[str, str],
 ) -> list[tuple[str, str]]:
-    """Convert a span of nodes into written ``.py``/``.ipynb`` files, per ``formats``.
+    """Convert a span of nodes into written ``.py``/``.ipynb``/marimo files, per ``formats``.
 
     Returns ``(label, rel_path)`` entries for whichever formats are
     requested -- empty if the span has no real code, or ``formats`` itself
@@ -1016,6 +1036,18 @@ def _build_download_entries(
     if not _has_real_code(source):
         return []
 
+    notebook = None
+    if 'ipynb' in formats or 'marimo' in formats:
+        ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
+        ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
+        ipynb_header = _title_underline_segment(header_title, 1, 'ipynb')
+        # Converted separately from the footer and concatenated, rather
+        # than joined into one segment list and converted together --
+        # the footer always gets its own dedicated cell this way.
+        cells = _segments_to_cells([ipynb_header, *ipynb_segments])
+        cells.extend(_segments_to_cells(_footer_segment(footer, 'ipynb', app, docname)))
+        notebook = _build_notebook(cells)
+
     entries = []
     for fmt in _FORMAT_ORDER:
         if fmt not in formats:
@@ -1023,16 +1055,10 @@ def _build_download_entries(
         label = link_labels[fmt]
         if fmt == 'py':
             rel_path = _write_source(app, name, source)
+        elif fmt == 'ipynb':
+            rel_path = _write_notebook(app, name, notebook)
         else:
-            ipynb_ctx = _RenderContext(app=app, docname=docname, fmt='ipynb')
-            ipynb_segments = _build_segments(nodes_in_span, ipynb_ctx)
-            ipynb_header = _title_underline_segment(header_title, 1, 'ipynb')
-            # Converted separately from the footer and concatenated, rather
-            # than joined into one segment list and converted together --
-            # the footer always gets its own dedicated cell this way.
-            cells = _segments_to_cells([ipynb_header, *ipynb_segments])
-            cells.extend(_segments_to_cells(_footer_segment(footer, 'ipynb', app, docname)))
-            rel_path = _write_notebook(app, name, _build_notebook(cells))
+            rel_path = _write_marimo_notebook(app, name, notebook)
         entries.append((label, rel_path))
 
     return entries
@@ -1315,6 +1341,12 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged = dict(_CONF_DEFAULTS)
     merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
+    if 'marimo' in merged['formats'] and importlib.util.find_spec('marimo') is None:
+        msg = (
+            "sphinx_examples_as_code_conf['formats'] includes 'marimo', but marimo is not "
+            "installed. Install it with: pip install 'sphinx-examples-as-code[marimo]'"
+        )
+        raise ConfigError(msg)
     config.sphinx_examples_as_code_conf = merged
 
 

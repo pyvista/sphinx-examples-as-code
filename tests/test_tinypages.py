@@ -460,11 +460,13 @@ def test_notebook_code_cells_match_py_code(
 
 
 @pytest.mark.parametrize(
-    ('formats', 'expect_py', 'expect_ipynb'),
+    ('formats', 'expect_py', 'expect_ipynb', 'expect_marimo'),
     [
-        ('py', True, False),
-        ('ipynb', False, True),
-        ('py,ipynb', True, True),
+        ('py', True, False, False),
+        ('ipynb', False, True, False),
+        ('py,ipynb', True, True, False),
+        ('marimo', False, False, True),
+        ('py,ipynb,marimo', True, True, True),
     ],
 )
 def test_formats_config_selection(
@@ -472,6 +474,7 @@ def test_formats_config_selection(
     formats: str,
     expect_py: bool,
     expect_ipynb: bool,
+    expect_marimo: bool,
 ):
     """``sphinx_examples_as_code_conf['formats']`` controls which download(s) get generated."""
     html_dir = tmp_path / 'html'
@@ -487,15 +490,18 @@ def test_formats_config_selection(
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    py_files = list(downloads_dir.rglob('*.py'))
+    marimo_files = list(downloads_dir.rglob('*.marimo.py'))
+    py_files = [p for p in downloads_dir.rglob('*.py') if p not in marimo_files]
     ipynb_files = list(downloads_dir.rglob('*.ipynb'))
 
     assert bool(py_files) == expect_py
     assert bool(ipynb_files) == expect_ipynb
+    assert bool(marimo_files) == expect_marimo
 
     html = (html_dir / 'docstring_cases.html').read_text(encoding='utf-8')
     assert ('Download Python source code' in html) == expect_py
     assert ('Download Jupyter notebook' in html) == expect_ipynb
+    assert ('Download marimo notebook' in html) == expect_marimo
 
 
 # ---------------------------------------------------------------------------

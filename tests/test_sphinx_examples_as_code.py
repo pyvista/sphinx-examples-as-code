@@ -1852,6 +1852,8 @@ def test_process_span_footer_in_notebook_is_linkified(tmp_path: Path):
         (['ipynb'], ['.ipynb']),
         (['py', 'ipynb'], ['.py', '.ipynb']),
         (['ipynb', 'py'], ['.py', '.ipynb']),  # canonical order regardless of config order
+        (['marimo'], ['.marimo.py']),
+        (['marimo', 'py', 'ipynb'], ['.py', '.ipynb', '.marimo.py']),
         ([], []),
     ],
 )
@@ -2528,6 +2530,19 @@ def test_finalize_conf_coerces_cli_override_style_strings():
     conf = config.sphinx_examples_as_code_conf
     assert conf['formats'] == ['py', 'ipynb']
     assert conf['gallery_downloads'] is True
+
+
+def test_finalize_conf_marimo_format_without_marimo_raises(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(seac.importlib.util, 'find_spec', lambda _name: None)
+    config = Mock(sphinx_examples_as_code_conf={'formats': ['py', 'marimo']})
+    with pytest.raises(ConfigError, match=r"includes 'marimo', but marimo is not installed"):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_marimo_format_with_marimo_installed():
+    config = Mock(sphinx_examples_as_code_conf={'formats': 'py,marimo'})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['formats'] == ['py', 'marimo']
 
 
 def test_finalize_conf_base_url_is_an_unknown_key():
