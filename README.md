@@ -164,8 +164,13 @@ Two things worth knowing before turning this on:
   block — not a documented extension API. A future sphinx-gallery release could shift
   that structure without warning. Only sphinx-gallery 0.22.x is tested, so the `gallery`
   extra caps there rather than letting the next release quietly produce no downloads.
-- sphinx-gallery's own `.py`/`.ipynb`/`.zip` downloads still end up copied into
-  `_downloads/`, even though nothing on the page links to them anymore.
+- sphinx-gallery's own `.py`/`.zip` downloads still end up copied into `_downloads/`,
+  even though nothing on the page links to them anymore. Its `.ipynb` is never written:
+  with `gallery_downloads` on, this extension sets `sphinx_gallery_conf['pypandoc']` to
+  `False` and `sphinx_gallery_conf['notebook_extensions']` to an empty set before
+  sphinx-gallery reads them, so pandoc is not needed. Setting `pypandoc`,
+  `notebook_extensions`, `first_notebook_cell`, `last_notebook_cell` or `notebook_images`
+  yourself has no effect and is reported as a warning.
 
 ## Development
 

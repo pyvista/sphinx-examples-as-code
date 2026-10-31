@@ -261,3 +261,45 @@ def test_gallery_downloads_generated_py_executes(gallery_build: tuple[Path, str]
         check=False,
     )
     assert result.returncode == 0, f'{result.stdout}\n{result.stderr}'
+
+
+def _build_with_gallery_conf(tmp_path: Path, extra_conf: str) -> tuple[int, str, str, Path]:
+    """Build the fixture with ``extra_conf`` appended to its conf.py and warnings kept going."""
+    src_dir = tmp_path / 'src'
+    shutil.copytree(FIXTURE_DIR, src_dir)
+    with (src_dir / 'conf.py').open('a', encoding='utf-8') as f:
+        f.write(extra_conf)
+    html_dir = tmp_path / 'html'
+    sphinx_args = ('--keep-going', '-D', 'sphinx_examples_as_code_conf.gallery_downloads=1')
+    returncode, out, err = _run_sphinx_build(
+        _sphinx_build_cmd(src_dir, html_dir, tmp_path / 'doctrees', sphinx_args)
+    )
+    return returncode, out, err, src_dir
+
+
+def test_gallery_downloads_disabled_keeps_gallery_notebooks(tmp_path: Path):
+    """Off, sphinx-gallery writes its own notebooks as usual."""
+    returncode, out, err, _html_dir = _build(tmp_path, gallery_downloads=False)
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    assert list((tmp_path / 'src' / 'auto_examples').rglob('*.ipynb'))
+
+
+def test_gallery_downloads_enabled_skips_gallery_notebooks(tmp_path: Path):
+    """On, sphinx-gallery writes no notebook and reports nothing about pandoc."""
+    returncode, out, err, src_dir = _build_with_gallery_conf(tmp_path, '')
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    assert not list((src_dir / 'auto_examples').rglob('*.ipynb'))
+    assert 'pandoc' not in err.lower()
+
+
+def test_gallery_downloads_enabled_warns_about_notebook_settings(tmp_path: Path):
+    """On, notebook settings in sphinx_gallery_conf are reported and overridden."""
+    extra_conf = (
+        "sphinx_gallery_conf['pypandoc'] = True\n"
+        "sphinx_gallery_conf['first_notebook_cell'] = '%matplotlib inline'\n"
+    )
+    returncode, _out, err, src_dir = _build_with_gallery_conf(tmp_path, extra_conf)
+    assert returncode != 0
+    assert "sphinx_gallery_conf key(s) 'pypandoc', 'first_notebook_cell' have no effect" in err
+    assert 'pandoc' not in err.lower().replace('pypandoc', '')
+    assert not list((src_dir / 'auto_examples').rglob('*.ipynb'))
