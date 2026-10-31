@@ -1481,7 +1481,7 @@ def test_footer_segment_default_footer_jupyter_links_clickable():
 # ---------------------------------------------------------------------------
 
 
-def test_write_source_writes_file_with_32_char_digest(tmp_path: Path):
+def test_write_python_script_writes_file_with_32_char_digest(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     rel_path = seac._write_python_script(app, 'pkg.func', 'x = 1\n')
     digest, filename = rel_path.split('/')
@@ -1490,7 +1490,7 @@ def test_write_source_writes_file_with_32_char_digest(tmp_path: Path):
     assert (tmp_path / '_downloads' / digest / filename).read_text() == 'x = 1\n'
 
 
-def test_write_source_empty_name_fallback(tmp_path: Path):
+def test_write_python_script_empty_name_fallback(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     rel_path = seac._write_python_script(app, '', 'x = 1\n')
     assert rel_path.endswith('/example.py')
@@ -1616,7 +1616,7 @@ def test_build_notebook_valid_nbformat():
 # ---------------------------------------------------------------------------
 
 
-def test_write_notebook_writes_valid_json(tmp_path: Path):
+def test_write_jupyter_notebook_writes_valid_json(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     notebook = seac._build_notebook([('code', ['x = 1'])])
     rel_path = seac._write_jupyter_notebook(app, 'pkg.func', notebook)
@@ -1904,6 +1904,7 @@ def test_process_span_respects_formats_config(
         ),
         (['x = 1\n', 'from __future__ import annotations'], ['x = 1\n']),
         (['%matplotlib inline\n', 'from __future__ import annotations'], None),
+        (['from __future__ import annotations; x = 1\n', 'print(x)'], None),
     ],
 )
 def test_drop_future_imports(source: list[str], expected: list[str] | None):
@@ -2555,7 +2556,7 @@ def test_finalize_conf_coerces_cli_override_style_strings():
 def test_finalize_conf_marimo_format_without_marimo_raises(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(seac.importlib.util, 'find_spec', lambda _name: None)
     config = Mock(sphinx_examples_as_code_conf={'formats': ['python', 'marimo']})
-    with pytest.raises(ConfigError, match=r"includes 'marimo', but marimo is not installed"):
+    with pytest.raises(ConfigError, match=r"includes 'marimo', which needs marimo 0.14 or newer"):
         seac._finalize_conf(Mock(), config)
 
 
@@ -2614,6 +2615,24 @@ def test_finalize_conf_link_labels_not_a_dict_raises():
     config = Mock(sphinx_examples_as_code_conf={'link_labels': 'nope'})
     with pytest.raises(ConfigError, match=r"link_labels'\] must be a dict"):
         seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_link_labels_old_key_names_raise_with_new_names():
+    config = Mock(sphinx_examples_as_code_conf={'link_labels': {'py': 'Get the script'}})
+    with pytest.raises(ConfigError, match=r"Renamed: 'py' is now 'python'\."):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_marimo_converter_available_without_marimo(monkeypatch: pytest.MonkeyPatch):
+    def find_spec(name):
+        raise ModuleNotFoundError(name)
+
+    monkeypatch.setattr(seac.importlib.util, 'find_spec', find_spec)
+    assert seac._marimo_converter_available() is False
+
+
+def test_marimo_converter_available_with_marimo():
+    assert seac._marimo_converter_available() is True
 
 
 def test_finalize_conf_link_labels_unknown_format_key_raises():

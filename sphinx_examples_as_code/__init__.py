@@ -388,7 +388,7 @@ def _title_underline_segment(title: str, level: int, fmt: str) -> Segment:
 
     A Python script always uses an RST-style title + underline (e.g. ``# Title`` +
     ``# =====``), one character per level (see ``_TITLE_UNDERLINE_CHARS``);
-    A Jupyter notebook always uses ATX ``#`` syntax instead (e.g. ``# ### Title``).
+    a Jupyter notebook always uses ATX ``#`` syntax instead (e.g. ``# ### Title``).
     """
     level = min(level, _MAX_HEADING_LEVEL)
     if fmt == 'jupyter':
@@ -944,17 +944,18 @@ def _write_jupyter_notebook(app: Sphinx, name: str, notebook: dict) -> str:
 
 
 def _drop_future_imports(source: list[str]) -> list[str]:
-    """Remove every ``from __future__`` import from a code cell's source lines."""
+    """Remove the lines of every ``from __future__`` import that has its lines to itself."""
     try:
         tree = ast.parse(''.join(source))
     except SyntaxError:
         return source
-    dropped = {
-        line
-        for node in tree.body
-        if isinstance(node, ast.ImportFrom) and node.module == '__future__'
-        for line in range(node.lineno, node.end_lineno + 1)
-    }
+
+    def lines(node: ast.stmt) -> set[int]:
+        return set(range(node.lineno, node.end_lineno + 1))
+
+    future = [n for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == '__future__']
+    shared = set().union(*(lines(n) for n in tree.body if n not in future))
+    dropped = set().union(*(lines(n) for n in future)) - shared
     return [line for i, line in enumerate(source, start=1) if i not in dropped]
 
 
@@ -1335,12 +1336,20 @@ def _merged_link_labels(value: object) -> dict[str, str]:
             f"sphinx_examples_as_code_conf['link_labels'] has unknown key(s) {unknown} "
             f'(valid keys: {valid}).'
         )
-        raise ConfigError(msg)
+        raise ConfigError(msg + _renamed_hint(unknown))
     return {**_DEFAULT_LINK_LABELS, **value}
 
 
-#: Format names from before the formats were named after their tool.
+#: Retired format names and the names that replace them.
 _RENAMED_FORMATS = {'py': 'python', 'ipynb': 'jupyter'}
+
+
+def _renamed_hint(unknown: list[str]) -> str:
+    """Return a `` Renamed: ...`` suffix naming the replacement for any retired format name."""
+    renamed = [
+        f'{old!r} is now {_RENAMED_FORMATS[old]!r}' for old in unknown if old in _RENAMED_FORMATS
+    ]
+    return f' Renamed: {", ".join(renamed)}.' if renamed else ''
 
 
 def _validate_formats(formats: list[str]) -> None:
@@ -1352,12 +1361,15 @@ def _validate_formats(formats: list[str]) -> None:
     msg = (
         f"sphinx_examples_as_code_conf['formats'] has unknown format(s) {unknown} (valid: {valid})."
     )
-    renamed = [
-        f'{old!r} is now {_RENAMED_FORMATS[old]!r}' for old in unknown if old in _RENAMED_FORMATS
-    ]
-    if renamed:
-        msg += f' Renamed: {", ".join(renamed)}.'
-    raise ConfigError(msg)
+    raise ConfigError(msg + _renamed_hint(unknown))
+
+
+def _marimo_converter_available() -> bool:
+    """Check whether marimo's notebook converter (marimo 0.14 or newer) is importable."""
+    try:
+        return importlib.util.find_spec('marimo._convert.converters') is not None
+    except ModuleNotFoundError:
+        return False
 
 
 def _finalize_conf(_app: Sphinx, config: Config) -> None:
@@ -1379,16 +1391,15 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
     _validate_formats(merged['formats'])
-    if 'marimo' in merged['formats'] and importlib.util.find_spec('marimo') is None:
-        if 'formats' not in user_conf:
-            merged['formats'] = [fmt for fmt in merged['formats'] if fmt != 'marimo']
-            config.sphinx_examples_as_code_conf = merged
-            return
-        msg = (
-            "sphinx_examples_as_code_conf['formats'] includes 'marimo', but marimo is not "
-            "installed. Install it with: pip install 'sphinx-examples-as-code[marimo]'"
-        )
-        raise ConfigError(msg)
+    if 'marimo' in merged['formats'] and not _marimo_converter_available():
+        if 'formats' in user_conf:
+            msg = (
+                "sphinx_examples_as_code_conf['formats'] includes 'marimo', which needs "
+                'marimo 0.14 or newer. Install it with: '
+                "pip install 'sphinx-examples-as-code[marimo]'"
+            )
+            raise ConfigError(msg)
+        merged['formats'] = [fmt for fmt in merged['formats'] if fmt != 'marimo']
     config.sphinx_examples_as_code_conf = merged
 
 

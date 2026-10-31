@@ -20,7 +20,7 @@ Sphinx-Gallery integration is opt-in and needs a compatible sphinx-gallery, whic
 pip install 'sphinx-examples-as-code[gallery]'
 ```
 
-marimo notebook downloads need marimo, which the `marimo` extra installs:
+marimo notebook downloads need marimo 0.14 or newer, which the `marimo` extra installs:
 
 ```bash
 pip install 'sphinx-examples-as-code[marimo]'
@@ -62,9 +62,9 @@ sphinx_examples_as_code_conf = {
 - `formats`: which downloads to generate. A list containing any of `'python'` (a plain
   Python script, `<name>.py`), `'jupyter'` (a Jupyter notebook, `<name>.ipynb`) and
   `'marimo'` (a marimo notebook, `<name>.marimo.py`); defaults to all three. Always
-  offered in that order regardless of how the list is written. Without marimo installed,
-  the default skips the marimo download, and a `formats` that names `'marimo'` stops the
-  build with a configuration error. An unknown format raises a configuration error too;
+  offered in that order regardless of how the list is written. Without marimo 0.14 or
+  newer installed, the default skips the marimo download, and a `formats` that names
+  `'marimo'` (in `conf.py` or through `-D`) stops the build with a configuration error. An unknown format raises a configuration error too;
   the old `'py'` and `'ipynb'` names say what replaced them.
 - `link_labels`: the text of the download link(s) themselves, per format. Set only the
   format(s) you want to change; any left unset keep reading their own default shown above.
