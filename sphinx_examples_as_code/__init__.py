@@ -166,13 +166,19 @@ def _is_see_also_section(node: nodes.Node) -> bool:
     )
 
 
+#: Download format names, as written in ``sphinx_examples_as_code_conf['formats']``.
+_FMT_PYTHON = 'python'
+_FMT_JUPYTER = 'jupyter'
+_FMT_MARIMO = 'marimo'
+
+
 @dataclass(frozen=True)
 class _RenderContext:
     """State threaded through the conversion functions for one output format."""
 
     app: Sphinx
     docname: str
-    fmt: str  # 'python' or 'jupyter'
+    fmt: str  # _FMT_PYTHON or _FMT_JUPYTER
     in_footer: bool = False
 
 
@@ -260,7 +266,7 @@ def _render_reference(node: nodes.reference, ctx: _RenderContext) -> str:
     if url is None:
         return f'`{display}`' if is_code else display
 
-    if ctx.fmt == 'jupyter':
+    if ctx.fmt == _FMT_JUPYTER:
         return f'[`{display}`]({url})' if is_code else f'[{display}]({url})'
 
     if ctx.in_footer:
@@ -394,7 +400,7 @@ def _title_underline_segment(title: str, level: int, fmt: str) -> Segment:
     a Jupyter notebook always uses ATX ``#`` syntax instead (e.g. ``# ### Title``).
     """
     level = min(level, _MAX_HEADING_LEVEL)
-    if fmt == 'jupyter':
+    if fmt == _FMT_JUPYTER:
         return ('directive', [f'# {"#" * level} {title}'])
     underline = _TITLE_UNDERLINE_CHARS[level] * len(title)
     return ('directive', [f'# {title}', f'# {underline}'])
@@ -465,7 +471,7 @@ def _indent_label_content(lines: list[str], fmt: str) -> list[str]:
 
     Python scripts only.
     """
-    if fmt != 'python' or not lines:
+    if fmt != _FMT_PYTHON or not lines:
         return lines
     label, *rest = _fill_comment_gaps(lines)
     return [label, *(_indent_comment_line(line) for line in rest)]
@@ -480,7 +486,7 @@ def _definition_segment(node: nodes.definition, ctx: _RenderContext) -> list[Seg
     for child in node.children:
         segments.extend(_convert_node(child, ctx))
     lines = _join_segments(segments)
-    if ctx.fmt == 'python':
+    if ctx.fmt == _FMT_PYTHON:
         lines = [_indent_comment_line(line) for line in _fill_comment_gaps(lines)]
     return [('text', lines)] if lines else []
 
@@ -513,7 +519,7 @@ def _list_segment(
 
 
 #: Narrowest a generated table column may be, per format.
-_TABLE_MIN_WIDTH = {'python': 1, 'jupyter': 3}
+_TABLE_MIN_WIDTH = {_FMT_PYTHON: 1, _FMT_JUPYTER: 3}
 
 
 def _table_cell_text(entry: nodes.entry, ctx: _RenderContext) -> str:
@@ -574,7 +580,7 @@ def _markdown_table_lines(head: list[list[str]], body: list[list[str]]) -> list[
     """Render rows as a Markdown pipe table, with a blank header row if there is none."""
     head = [[cell.replace('|', r'\|') for cell in row] for row in head]
     body = [[cell.replace('|', r'\|') for cell in row] for row in body]
-    widths = _table_widths([*head, *body], _TABLE_MIN_WIDTH['jupyter'])
+    widths = _table_widths([*head, *body], _TABLE_MIN_WIDTH[_FMT_JUPYTER])
 
     def render(cells: list[str]) -> str:
         padded = (cell.ljust(width) for cell, width in zip(cells, widths, strict=True))
@@ -587,7 +593,7 @@ def _markdown_table_lines(head: list[list[str]], body: list[list[str]]) -> list[
 
 def _simple_table_lines(head: list[list[str]], body: list[list[str]]) -> list[str]:
     """Render rows as an RST simple table, bordered above, below and under its header."""
-    widths = _table_widths([*head, *body], _TABLE_MIN_WIDTH['python'])
+    widths = _table_widths([*head, *body], _TABLE_MIN_WIDTH[_FMT_PYTHON])
     border = '  '.join('=' * width for width in widths)
 
     def render(cells: list[str]) -> str:
@@ -616,7 +622,7 @@ def _table_segment(node: nodes.table, ctx: _RenderContext) -> list[Segment]:
     if caption is not None and (text := _render_inline(caption, ctx).strip()):
         _add_comment(lines, text)
         lines.append('#')
-    render = _markdown_table_lines if ctx.fmt == 'jupyter' else _simple_table_lines
+    render = _markdown_table_lines if ctx.fmt == _FMT_JUPYTER else _simple_table_lines
     for line in render(head, body):
         _add_comment(lines, line)
     return [('directive', lines)]
@@ -979,13 +985,13 @@ def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict) -> str:
 
 #: Default download link text per format -- see ``sphinx_examples_as_code_conf['link_labels']``.
 _DEFAULT_LINK_LABELS = {
-    'python': 'Download Python script',
-    'jupyter': 'Download Jupyter notebook',
-    'marimo': 'Download marimo notebook',
+    _FMT_PYTHON: 'Download Python script',
+    _FMT_JUPYTER: 'Download Jupyter notebook',
+    _FMT_MARIMO: 'Download marimo notebook',
 }
 #: The fixed order formats are offered in, regardless of how
 #: ``sphinx_examples_as_code_conf['formats']`` lists them.
-_FORMAT_ORDER = ('python', 'jupyter', 'marimo')
+_FORMAT_ORDER = (_FMT_PYTHON, _FMT_JUPYTER, _FMT_MARIMO)
 
 
 def _make_download_node(entries: list[tuple[str, str]]) -> nodes.paragraph:
@@ -1039,17 +1045,17 @@ def _build_download_entries(
     file's own header is the one heading every generated file has exactly
     one of (see ``_title_underline_segment``).
     """
-    python_ctx = _RenderContext(app=app, docname=docname, fmt='python')
+    python_ctx = _RenderContext(app=app, docname=docname, fmt=_FMT_PYTHON)
     python_segments = _build_segments(nodes_in_span, python_ctx)
 
     if not any(kind == 'code' for kind, _lines in python_segments):
         return []
 
-    python_header = _title_underline_segment(header_title, 1, 'python')
+    python_header = _title_underline_segment(header_title, 1, _FMT_PYTHON)
     python_segments_full = [
         python_header,
         *python_segments,
-        *_footer_segment(footer, 'python', app, docname),
+        *_footer_segment(footer, _FMT_PYTHON, app, docname),
     ]
     source = '\n'.join(_join_segments(python_segments_full)).rstrip() + '\n'
 
@@ -1057,15 +1063,15 @@ def _build_download_entries(
         return []
 
     notebook = None
-    if 'jupyter' in formats or 'marimo' in formats:
-        jupyter_ctx = _RenderContext(app=app, docname=docname, fmt='jupyter')
+    if _FMT_JUPYTER in formats or _FMT_MARIMO in formats:
+        jupyter_ctx = _RenderContext(app=app, docname=docname, fmt=_FMT_JUPYTER)
         jupyter_segments = _build_segments(nodes_in_span, jupyter_ctx)
-        jupyter_header = _title_underline_segment(header_title, 1, 'jupyter')
+        jupyter_header = _title_underline_segment(header_title, 1, _FMT_JUPYTER)
         # Converted separately from the footer and concatenated, rather
         # than joined into one segment list and converted together --
         # the footer always gets its own dedicated cell this way.
         cells = _segments_to_cells([jupyter_header, *jupyter_segments])
-        cells.extend(_segments_to_cells(_footer_segment(footer, 'jupyter', app, docname)))
+        cells.extend(_segments_to_cells(_footer_segment(footer, _FMT_JUPYTER, app, docname)))
         notebook = _build_notebook(cells)
 
     entries = []
@@ -1073,9 +1079,9 @@ def _build_download_entries(
         if fmt not in formats:
             continue
         label = link_labels[fmt]
-        if fmt == 'python':
+        if fmt == _FMT_PYTHON:
             rel_path = _write_python_script(app, name, source)
-        elif fmt == 'jupyter':
+        elif fmt == _FMT_JUPYTER:
             rel_path = _write_jupyter_notebook(app, name, notebook)
         else:
             rel_path = _write_marimo_notebook(app, name, notebook)
@@ -1292,7 +1298,7 @@ _DEFAULT_FOOTER = (
 #: start rather than silently doing nothing.
 _CONF_DEFAULTS: dict[str, object] = {
     'link_position': 'top',
-    'formats': ['python', 'jupyter', 'marimo'],
+    'formats': list(_FORMAT_ORDER),
     'gallery_downloads': False,
     'footer': _DEFAULT_FOOTER,
     'link_labels': _DEFAULT_LINK_LABELS,
@@ -1344,7 +1350,7 @@ def _merged_link_labels(value: object) -> dict[str, str]:
 
 
 #: Retired format names and the names that replace them.
-_RENAMED_FORMATS = {'py': 'python', 'ipynb': 'jupyter'}
+_RENAMED_FORMATS = {'py': _FMT_PYTHON, 'ipynb': _FMT_JUPYTER}
 
 
 def _renamed_hint(unknown: list[str]) -> str:
@@ -1394,7 +1400,7 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
     _validate_formats(merged['formats'])
-    if 'marimo' in merged['formats'] and not _marimo_converter_available():
+    if _FMT_MARIMO in merged['formats'] and not _marimo_converter_available():
         if 'formats' in user_conf:
             msg = (
                 "sphinx_examples_as_code_conf['formats'] includes 'marimo', which needs "
@@ -1402,7 +1408,7 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
                 "pip install 'sphinx-examples-as-code[marimo]'"
             )
             raise ConfigError(msg)
-        merged['formats'] = [fmt for fmt in merged['formats'] if fmt != 'marimo']
+        merged['formats'] = [fmt for fmt in merged['formats'] if fmt != _FMT_MARIMO]
     config.sphinx_examples_as_code_conf = merged
 
 
