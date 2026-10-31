@@ -1953,6 +1953,7 @@ def test_setup_registers_connect_and_config():
     result = seac.setup(app)
     app.connect.assert_any_call('doctree-resolved', seac._process_doctree)
     app.connect.assert_any_call('config-inited', seac._finalize_conf)
+    app.connect.assert_any_call('config-inited', seac._disable_gallery_notebooks, priority=5)
     app.add_config_value.assert_called_once_with('sphinx_examples_as_code_conf', {}, 'env')
     assert result['version'] == seac.__version__
     assert result['parallel_read_safe'] is True
@@ -2595,3 +2596,68 @@ def test_add_comment_normalizes_smart_quotes():
 def test_convert_node_paragraph_normalizes_smart_quotes():
     doctree = _parse('an array\u2019s \u201cvalues\u201d')
     assert seac._convert_node(doctree[0], _ctx()) == [('text', ['# an array\'s "values"'])]
+
+
+# ---------------------------------------------------------------------------
+# _disable_gallery_notebooks
+# ---------------------------------------------------------------------------
+
+
+def _gallery_config(gallery_downloads: object, gallery_conf: object) -> Mock:
+    """Build a config stub with both extensions' settings."""
+    config = Mock(spec=['sphinx_examples_as_code_conf', 'sphinx_gallery_conf'])
+    config.sphinx_examples_as_code_conf = {'gallery_downloads': gallery_downloads}
+    config.sphinx_gallery_conf = gallery_conf
+    return config
+
+
+@pytest.mark.parametrize('gallery_downloads', [False, '0'])
+def test_disable_gallery_notebooks_off_leaves_gallery_conf(gallery_downloads: object):
+    gallery_conf = {'pypandoc': True}
+    seac._disable_gallery_notebooks(Mock(), _gallery_config(gallery_downloads, gallery_conf))
+    assert gallery_conf == {'pypandoc': True}
+
+
+def test_disable_gallery_notebooks_without_sphinx_gallery():
+    config = Mock(spec=['sphinx_examples_as_code_conf'])
+    config.sphinx_examples_as_code_conf = {'gallery_downloads': True}
+    seac._disable_gallery_notebooks(Mock(), config)
+
+
+def test_disable_gallery_notebooks_unset_conf_key():
+    config = Mock(spec=['sphinx_examples_as_code_conf', 'sphinx_gallery_conf'])
+    config.sphinx_examples_as_code_conf = {}
+    config.sphinx_gallery_conf = {'pypandoc': True}
+    seac._disable_gallery_notebooks(Mock(), config)
+    assert config.sphinx_gallery_conf == {'pypandoc': True}
+
+
+@pytest.mark.parametrize('gallery_downloads', [True, '1'])
+def test_disable_gallery_notebooks_on_overrides_quietly(
+    gallery_downloads: object, caplog: pytest.LogCaptureFixture
+):
+    gallery_conf = {'examples_dirs': 'examples'}
+    seac._disable_gallery_notebooks(Mock(), _gallery_config(gallery_downloads, gallery_conf))
+    assert gallery_conf == {
+        'examples_dirs': 'examples',
+        'pypandoc': False,
+        'notebook_extensions': set(),
+    }
+    assert caplog.records == []
+
+
+def test_disable_gallery_notebooks_on_warns_about_set_keys(caplog: pytest.LogCaptureFixture):
+    gallery_conf = {
+        'pypandoc': True,
+        'notebook_extensions': set(),
+        'first_notebook_cell': '%matplotlib inline',
+        'notebook_images': True,
+    }
+    seac._disable_gallery_notebooks(Mock(), _gallery_config(True, gallery_conf))
+    assert gallery_conf['pypandoc'] is False
+    assert gallery_conf['notebook_extensions'] == set()
+    [record] = caplog.records
+    assert record.levelname == 'WARNING'
+    assert (
+        "'pypandoc', 'first_notebook_cell', 'notebook_images' have no effect" in record.getMessage()
+    )
