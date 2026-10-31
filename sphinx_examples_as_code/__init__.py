@@ -7,11 +7,15 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+import functools
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 from pathlib import Path
 import re
+import shlex
+import sys
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 from urllib.parse import urlsplit
@@ -921,6 +925,12 @@ def _build_notebook(cells: list[tuple[str, list[str]]]) -> dict:
     }
 
 
+def _download_filename(name: str, extension: str) -> str:
+    """Return the file name a download is written under, e.g. ``pyvista_read.py``."""
+    safe_name = name.replace('.', '_') if name else 'example'
+    return f'{safe_name}.{extension}'
+
+
 def _write_download_file(app: Sphinx, name: str, extension: str, content: str) -> str:
     """Write generated content directly into the builder's downloads dir.
 
@@ -932,8 +942,7 @@ def _write_download_file(app: Sphinx, name: str, extension: str, content: str) -
     """
     # 32 hex chars, matching Sphinx's own native _downloads/<digest>/... layout.
     digest = hashlib.sha256(content.encode()).hexdigest()[:32]
-    safe_name = name.replace('.', '_') if name else 'example'
-    filename = f'{safe_name}.{extension}'
+    filename = _download_filename(name, extension)
     rel_path = f'{digest}/{filename}'
 
     out_path = Path(app.outdir) / '_downloads' / digest / filename
@@ -968,7 +977,7 @@ def _drop_future_imports(source: list[str]) -> list[str]:
     return [line for i, line in enumerate(source, start=1) if i not in dropped]
 
 
-def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict) -> str:
+def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict, header: str = '') -> str:
     """Convert a generated Jupyter notebook with marimo's own converter and write it."""
     from marimo._convert.converters import MarimoConvert
 
@@ -980,7 +989,83 @@ def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict) -> str:
         for cell in notebook['cells']
     ]
     source = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells})).to_py()
-    return _write_download_file(app, name, 'marimo.py', source)
+    return _write_download_file(app, name, 'marimo.py', header + source)
+
+
+@functools.cache
+def _module_distributions() -> dict[str, list[str]]:
+    """Map each importable top-level module to the distribution(s) providing it."""
+    return importlib.metadata.packages_distributions()
+
+
+def _canonical_name(requirement: str) -> str:
+    """Return a requirement's normalized name, e.g. ``pyvista`` for ``PyVista[all]>=0.4``."""
+    name = re.match(r'[A-Za-z0-9._-]*', requirement.strip()).group()
+    return re.sub(r'[-_.]+', '-', name).lower()
+
+
+def _distribution_for(module: str) -> str | None:
+    """Return the one installed distribution providing top-level ``module``, if there is one."""
+    dists = sorted(set(_module_distributions().get(module, [])))
+    if len(dists) == 1:
+        return dists[0]
+    if not dists:
+        # Editable installs can hide their modules from packages_distributions().
+        try:
+            return importlib.metadata.distribution(module).name
+        except importlib.metadata.PackageNotFoundError:
+            pass
+    logger.debug(
+        'sphinx_examples_as_code: no single distribution provides %r (%s), not listed.',
+        module,
+        ', '.join(dists) or 'none installed',
+    )
+    return None
+
+
+def _imported_distributions(source: str) -> list[str]:
+    """Return the third-party distributions whose modules ``source`` imports."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name.split('.')[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            modules.add(node.module.split('.')[0])
+    modules -= {*sys.stdlib_module_names, '__future__'}
+    dists = (_distribution_for(module) for module in sorted(modules))
+    return [dist for dist in dists if dist is not None]
+
+
+def _script_dependencies(source: str, extra: list[str]) -> list[str]:
+    """Return ``source``'s imported distributions plus ``extra``, which wins on a name clash."""
+    deps = {_canonical_name(dist): dist for dist in _imported_distributions(source)}
+    deps.update((_canonical_name(req), req) for req in extra)
+    return [deps[key] for key in sorted(deps)]
+
+
+def _script_metadata_header(deps: list[str], requires_python: str | None, run_line: str) -> str:
+    """Build a PEP 723 ``# /// script`` block followed by a one-line run instruction."""
+    lines = ['# /// script']
+    if requires_python:
+        lines.append(f'# requires-python = {json.dumps(requires_python)}')
+    if deps:
+        lines.append('# dependencies = [')
+        lines.extend(f'#     {json.dumps(dep)},' for dep in deps)
+        lines.append('# ]')
+    else:
+        lines.append('# dependencies = []')
+    lines.extend(['# ///', f'# {run_line}', ''])
+    return '\n'.join(lines) + '\n'
+
+
+def _jupyter_run_line(deps: list[str], filename: str) -> str:
+    """Build the one-line command that opens a generated notebook with its dependencies."""
+    with_args = ''.join(f' --with {shlex.quote(dep)}' for dep in deps)
+    return f'Open this notebook with: `uvx --from jupyterlab{with_args} jupyter-lab {filename}`'
 
 
 #: Default download link text per format -- see ``sphinx_examples_as_code_conf['link_labels']``.
@@ -1033,6 +1118,7 @@ def _build_download_entries(
     formats: list[str],
     footer: str | None,
     link_labels: dict[str, str],
+    script_metadata: dict | None = None,
 ) -> list[tuple[str, str]]:
     """Convert a span of nodes into written download files, per ``formats``.
 
@@ -1062,17 +1148,31 @@ def _build_download_entries(
     if not _has_real_code(source):
         return []
 
-    notebook = None
-    if _FMT_JUPYTER in formats or _FMT_MARIMO in formats:
+    deps: dict[str, list[str]] = {}
+    if script_metadata is not None:
+        implied = {_FMT_MARIMO: ['marimo']}
+        extra = script_metadata['dependencies']
+        deps = {
+            fmt: _script_dependencies(source, [*implied.get(fmt, []), *extra.get(fmt, [])])
+            for fmt in formats
+        }
+
+    def notebook_for(run_line: str | None) -> dict:
         jupyter_ctx = _RenderContext(app=app, docname=docname, fmt=_FMT_JUPYTER)
         jupyter_segments = _build_segments(nodes_in_span, jupyter_ctx)
         jupyter_header = _title_underline_segment(header_title, 1, _FMT_JUPYTER)
+        run_segments = [('text', [f'# {run_line}'])] if run_line else []
         # Converted separately from the footer and concatenated, rather
         # than joined into one segment list and converted together --
         # the footer always gets its own dedicated cell this way.
-        cells = _segments_to_cells([jupyter_header, *jupyter_segments])
+        cells = _segments_to_cells([jupyter_header, *run_segments, *jupyter_segments])
         cells.extend(_segments_to_cells(_footer_segment(footer, _FMT_JUPYTER, app, docname)))
-        notebook = _build_notebook(cells)
+        return _build_notebook(cells)
+
+    def header_for(fmt: str, run_line: str) -> str:
+        if not deps:
+            return ''
+        return _script_metadata_header(deps[fmt], script_metadata['requires_python'], run_line)
 
     entries = []
     for fmt in _FORMAT_ORDER:
@@ -1080,11 +1180,19 @@ def _build_download_entries(
             continue
         label = link_labels[fmt]
         if fmt == _FMT_PYTHON:
-            rel_path = _write_python_script(app, name, source)
+            filename = _download_filename(name, 'py')
+            header = header_for(fmt, f'Run this script with: uv run {filename}')
+            rel_path = _write_python_script(app, name, header + source)
         elif fmt == _FMT_JUPYTER:
-            rel_path = _write_jupyter_notebook(app, name, notebook)
+            filename = _download_filename(name, 'ipynb')
+            run_line = _jupyter_run_line(deps[fmt], filename) if deps else None
+            rel_path = _write_jupyter_notebook(app, name, notebook_for(run_line))
         else:
-            rel_path = _write_marimo_notebook(app, name, notebook)
+            filename = _download_filename(name, 'marimo.py')
+            run_line = f'Open this notebook with: uvx marimo edit --sandbox {filename}'
+            rel_path = _write_marimo_notebook(
+                app, name, notebook_for(None), header_for(fmt, run_line)
+            )
         entries.append((label, rel_path))
 
     return entries
@@ -1102,6 +1210,7 @@ def _process_span(
     formats: list[str],
     footer: str | None,
     link_labels: dict[str, str],
+    script_metadata: dict | None = None,
 ) -> None:
     """Convert one Examples span and insert download link(s) if it has real code."""
     nodes_in_span = list(parent.children[start:end])
@@ -1116,6 +1225,7 @@ def _process_span(
         formats,
         footer,
         link_labels,
+        script_metadata,
     )
     if not entries:
         return
@@ -1196,6 +1306,7 @@ def _process_gallery_page(
     formats: list[str],
     footer: str | None,
     link_labels: dict[str, str],
+    script_metadata: dict | None = None,
 ) -> None:
     """Replace a sphinx-gallery page's own download footer with converted downloads.
 
@@ -1238,6 +1349,7 @@ def _process_gallery_page(
         formats,
         footer,
         link_labels,
+        script_metadata,
     )
     if not entries:
         return
@@ -1263,9 +1375,12 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
     formats = conf['formats']
     footer = conf['footer']
     link_labels = conf['link_labels']
+    script_metadata = conf if conf['script_metadata'] else None
 
     if conf['gallery_downloads']:
-        _process_gallery_page(app, docname, doctree, position, formats, footer, link_labels)
+        _process_gallery_page(
+            app, docname, doctree, position, formats, footer, link_labels, script_metadata
+        )
 
     # Process spans per shared parent, last to first.
     spans = _examples_spans(doctree)
@@ -1285,6 +1400,7 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
             formats,
             footer,
             link_labels,
+            script_metadata,
         )
 
 
@@ -1302,6 +1418,9 @@ _CONF_DEFAULTS: dict[str, object] = {
     'gallery_downloads': False,
     'footer': _DEFAULT_FOOTER,
     'link_labels': _DEFAULT_LINK_LABELS,
+    'script_metadata': False,
+    'dependencies': {},
+    'requires_python': None,
 }
 
 
@@ -1319,14 +1438,14 @@ def _coerce_conf_value(key: str, value: object) -> object:
         return value
     if key == 'formats':
         return value.split(',')
-    if key == 'gallery_downloads':
+    if key in ('gallery_downloads', 'script_metadata'):
         if value == '0':
             return False
         if value == '1':
             return True
         msg = f"sphinx_examples_as_code_conf[{key!r}] must be '0' or '1', got {value!r}."
         raise ConfigError(msg)
-    return value  # link_position, footer: a string is already the real type
+    return value  # link_position, footer, requires_python: a string is already the real type
 
 
 def _merged_link_labels(value: object) -> dict[str, str]:
@@ -1373,6 +1492,22 @@ def _validate_formats(formats: list[str]) -> None:
     raise ConfigError(msg + _renamed_hint(unknown))
 
 
+def _validate_dependencies(dependencies: object) -> None:
+    """Raise a ``ConfigError`` unless ``dependencies`` maps known formats to lists of strings."""
+    key = "sphinx_examples_as_code_conf['dependencies']"
+    if not isinstance(dependencies, dict):
+        msg = f'{key} must be a dict, got {dependencies!r}.'
+        raise ConfigError(msg)
+    unknown = sorted(set(dependencies) - set(_FORMAT_ORDER))
+    if unknown:
+        msg = f'{key} has unknown format(s) {unknown} (valid: {", ".join(_FORMAT_ORDER)}).'
+        raise ConfigError(msg + _renamed_hint(unknown))
+    for fmt, reqs in dependencies.items():
+        if not isinstance(reqs, list) or not all(isinstance(req, str) for req in reqs):
+            msg = f'{key}[{fmt!r}] must be a list of strings, got {reqs!r}.'
+            raise ConfigError(msg)
+
+
 def _marimo_converter_available() -> bool:
     """Check whether marimo's notebook converter (marimo 0.14 or newer) is importable."""
     try:
@@ -1399,6 +1534,7 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged = dict(_CONF_DEFAULTS)
     merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
+    _validate_dependencies(merged['dependencies'])
     _validate_formats(merged['formats'])
     if _FMT_MARIMO in merged['formats'] and not _marimo_converter_available():
         if 'formats' in user_conf:

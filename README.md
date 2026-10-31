@@ -54,6 +54,9 @@ sphinx_examples_as_code_conf = {
         'jupyter': 'Download Jupyter notebook',
         'marimo': 'Download marimo notebook',
     },
+    'script_metadata': False,
+    'dependencies': {},
+    'requires_python': None,
 }
 ```
 
@@ -80,6 +83,14 @@ sphinx_examples_as_code_conf = {
   Markdown link in notebooks, and renders inline as `text url` in Python scripts. Plain
   text with no markup at all becomes one comment line per line of text, and
   blank-line-separated paragraphs stay separated.
+- `script_metadata`: `True` adds each download's dependencies and a one-line run
+  command. See [Dependencies and run commands](#dependencies-and-run-commands) below.
+  `False` (default) adds neither.
+- `dependencies`: extra requirements per format, added to the detected ones, e.g.
+  `{'jupyter': ['pyvista[jupyter]']}`. An entry naming a detected project replaces it,
+  so `{'python': ['pyvista>=0.46']}` pins a version.
+- `requires_python`: a `requires-python` specifier for the dependency block, e.g.
+  `'>=3.10'`. `None` (default) leaves it out.
 
 An unrecognized key raises a configuration error at build start.
 
@@ -90,6 +101,23 @@ Leave it unset and no links are generated anywhere.
 Overriding a single key from the command line works via a dotted `-D` flag, e.g.
 `-D sphinx_examples_as_code_conf.link_position=bottom` -- this only touches that one
 key, leaving the rest (`conf.py`'s values, or the defaults) alone.
+
+## Dependencies and run commands
+
+With `script_metadata` on, each download lists the third-party projects its code
+imports, plus any `dependencies` set for its format, and says how to run it:
+
+- Python scripts start with a [PEP 723](https://peps.python.org/pep-0723/) `# /// script`
+  block, followed by `# Run this script with: uv run <name>.py`.
+- Jupyter notebooks say `` Open this notebook with: `uvx --from jupyterlab --with <dependency> ... jupyter-lab <name>.ipynb` `` in their first cell.
+- marimo notebooks start with the same `# /// script` block, which also lists `marimo`,
+  followed by `# Open this notebook with: uvx marimo edit --sandbox <name>.marimo.py`.
+
+Imports are read from the code, not run. Each imported top-level module maps to the
+project that provides it in the environment building the docs; standard-library
+modules, relative imports and modules no single installed project provides are left
+out. Projects the code needs but never imports, such as an optional backend, go in
+`dependencies`.
 
 ## Conversion rules
 

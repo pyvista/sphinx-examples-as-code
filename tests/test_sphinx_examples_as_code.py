@@ -1961,6 +1961,7 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'script_metadata': False,
     }
 
     doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
@@ -2382,6 +2383,7 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'script_metadata': False,
     }
 
     doctree = _build_gallery_doctree()
@@ -2401,6 +2403,7 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
         'gallery_downloads': True,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'script_metadata': False,
     }
 
     doctree = _build_gallery_doctree()
@@ -2757,3 +2760,169 @@ def test_disable_gallery_notebooks_on_warns_about_set_keys(caplog: pytest.LogCap
     assert record.levelname == 'WARNING'
     expected = "'pypandoc', 'notebook_extensions', 'first_notebook_cell', 'notebook_images'"
     assert f'{expected} have no effect' in record.getMessage()
+
+
+# ---------------------------------------------------------------------------
+# script_metadata (PEP 723 dependencies and run lines)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('requirement', 'expected'),
+    [('numpy', 'numpy'), ('PyVista[jupyter]>=0.46', 'pyvista'), ('Foo_Bar.baz', 'foo-bar-baz')],
+)
+def test_canonical_name(requirement: str, expected: str):
+    assert seac._canonical_name(requirement) == expected
+
+
+def test_imported_distributions_skips_stdlib_relative_and_unknown():
+    source = (
+        'from __future__ import annotations\n'
+        'import json, os.path\n'
+        'import numpy as np\n'
+        'from docutils.nodes import Text\n'
+        'from . import sibling\n'
+        'import not_a_real_module_xyz\n'
+    )
+    assert seac._imported_distributions(source) == ['docutils', 'numpy']
+
+
+def test_imported_distributions_finds_nested_imports():
+    assert seac._imported_distributions('def f():\n    import numpy\n') == ['numpy']
+
+
+def test_imported_distributions_syntax_error_is_empty():
+    assert seac._imported_distributions('import (') == []
+
+
+def test_distribution_for_ambiguous_module_is_none(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(seac, '_module_distributions', lambda: {'shared': ['a', 'b']})
+    assert seac._distribution_for('shared') is None
+
+
+def test_distribution_for_falls_back_to_distribution_name(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(seac, '_module_distributions', dict)
+    assert seac._distribution_for('numpy') == 'numpy'
+
+
+def test_script_dependencies_extra_overrides_detected():
+    deps = seac._script_dependencies('import numpy\n', ['NumPy>=2', 'pooch'])
+    assert deps == ['NumPy>=2', 'pooch']
+
+
+def test_script_metadata_header():
+    header = seac._script_metadata_header(['numpy', 'a[b]'], '>=3.10', 'Run this script with: x')
+    assert header == (
+        '# /// script\n'
+        '# requires-python = ">=3.10"\n'
+        '# dependencies = [\n'
+        '#     "numpy",\n'
+        '#     "a[b]",\n'
+        '# ]\n'
+        '# ///\n'
+        '# Run this script with: x\n'
+        '\n'
+    )
+
+
+def test_script_metadata_header_no_dependencies():
+    header = seac._script_metadata_header([], None, 'run')
+    assert header == '# /// script\n# dependencies = []\n# ///\n# run\n\n'
+
+
+def test_jupyter_run_line_quotes_extras():
+    line = seac._jupyter_run_line(['numpy', 'pyvista[jupyter]'], 'x.ipynb')
+    assert line == (
+        'Open this notebook with: `uvx --from jupyterlab --with numpy '
+        "--with 'pyvista[jupyter]' jupyter-lab x.ipynb`"
+    )
+
+
+def _write_with_metadata(tmp_path: Path, formats: list[str]) -> tuple[str, str]:
+    app = Mock(outdir=str(tmp_path))
+    _doctree, parent, start, end, heading = _build_examples_doctree(
+        '.. rubric:: Examples\n\n>>> import json\n>>> import numpy as np\n>>> x = np.zeros(3)'
+    )
+    script_metadata = {'dependencies': {'jupyter': ['ipywidgets']}, 'requires_python': '>=3.10'}
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'top',
+        formats,
+        None,
+        seac._DEFAULT_LINK_LABELS,
+        script_metadata,
+    )
+    (path,) = (p for p in (tmp_path / '_downloads').rglob('*') if p.is_file())
+    return path.name, path.read_text(encoding='utf-8')
+
+
+def test_script_metadata_python(tmp_path: Path):
+    name, source = _write_with_metadata(tmp_path, ['python'])
+    assert source.startswith(
+        '# /// script\n# requires-python = ">=3.10"\n# dependencies = [\n#     "numpy",\n# ]\n'
+        f'# ///\n# Run this script with: uv run {name}\n\n# Examples from page-example-1\n'
+    )
+
+
+def test_script_metadata_jupyter(tmp_path: Path):
+    name, source = _write_with_metadata(tmp_path, ['jupyter'])
+    first_cell = json.loads(source)['cells'][0]
+    assert [line.rstrip() for line in first_cell['source']] == [
+        '# Examples from page-example-1',
+        '',
+        (
+            'Open this notebook with: `uvx --from jupyterlab --with ipywidgets --with numpy '
+            f'jupyter-lab {name}`'
+        ),
+    ]
+
+
+def test_script_metadata_marimo(tmp_path: Path):
+    name, source = _write_with_metadata(tmp_path, ['marimo'])
+    header = (
+        '# /// script\n# requires-python = ">=3.10"\n# dependencies = [\n'
+        '#     "marimo",\n#     "numpy",\n# ]\n'
+        f'# ///\n# Open this notebook with: uvx marimo edit --sandbox {name}\n\n'
+    )
+    assert source.startswith(header)
+    assert 'Open this notebook' not in source.removeprefix(header)
+
+
+def test_process_doctree_script_metadata_enabled(tmp_path: Path):
+    app = Mock(outdir=str(tmp_path))
+    app.builder.download_support = True
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'script_metadata': True,
+    }
+    seac._process_doctree(app, _parse('.. rubric:: Examples\n\n>>> import numpy'), 'page')
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert '#     "numpy",' in written.read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize(('raw', 'expected'), [('0', False), ('1', True)])
+def test_coerce_conf_value_script_metadata_bool_strings(raw: str, expected: bool):
+    assert seac._coerce_conf_value('script_metadata', raw) is expected
+
+
+@pytest.mark.parametrize(
+    ('dependencies', 'match'),
+    [
+        (['numpy'], 'must be a dict'),
+        ({'pdf': ['numpy']}, r"unknown format\(s\) \['pdf'\]"),
+        ({'ipynb': ['numpy']}, "'ipynb' is now 'jupyter'"),
+        ({'python': 'numpy'}, r"\['python'\] must be a list of strings"),
+        ({'python': [1]}, r"\['python'\] must be a list of strings"),
+    ],
+)
+def test_finalize_conf_invalid_dependencies_raises(dependencies: object, match: str):
+    config = Mock(sphinx_examples_as_code_conf={'dependencies': dependencies})
+    with pytest.raises(ConfigError, match=match):
+        seac._finalize_conf(Mock(), config)
