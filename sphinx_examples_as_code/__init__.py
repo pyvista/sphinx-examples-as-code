@@ -20,8 +20,11 @@ from docutils import nodes
 from docutils.core import publish_doctree
 from sphinx import addnodes
 from sphinx.errors import ConfigError
+from sphinx.util import logging
 
 from ._version import __version__
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -1392,10 +1395,50 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     config.sphinx_examples_as_code_conf = merged
 
 
+#: sphinx-gallery settings that only shape its own notebook downloads.
+_GALLERY_NOTEBOOK_KEYS = (
+    'pypandoc',
+    'notebook_extensions',
+    'first_notebook_cell',
+    'last_notebook_cell',
+    'notebook_images',
+)
+
+
+def _disable_gallery_notebooks(_app: Sphinx, config: Config) -> None:
+    """Turn off sphinx-gallery's notebook output when ``gallery_downloads`` is on."""
+    gallery_downloads = config.sphinx_examples_as_code_conf.get('gallery_downloads', False)
+    if not _coerce_conf_value('gallery_downloads', gallery_downloads):
+        return
+    gallery_conf = getattr(config, 'sphinx_gallery_conf', None)
+    if not isinstance(gallery_conf, dict):
+        return
+    from sphinx_gallery.gen_gallery import DEFAULT_GALLERY_CONF
+
+    overrides = {'pypandoc': False, 'notebook_extensions': set()}
+    set_keys = [
+        key
+        for key in _GALLERY_NOTEBOOK_KEYS
+        if gallery_conf.get(key, DEFAULT_GALLERY_CONF[key])
+        not in (DEFAULT_GALLERY_CONF[key], overrides.get(key))
+    ]
+    if set_keys:
+        logger.warning(
+            'sphinx_gallery_conf key(s) %s have no effect: sphinx_examples_as_code writes the '
+            "gallery downloads, so sphinx-gallery's own notebooks are not generated.",
+            ', '.join(repr(key) for key in set_keys),
+            type='sphinx_examples_as_code',
+            subtype='gallery_conf',
+        )
+    config.sphinx_gallery_conf = {**gallery_conf, **overrides}
+
+
 def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     """Register the extension."""
     app.connect('doctree-resolved', _process_doctree)
     app.connect('config-inited', _finalize_conf)
+    # sphinx-gallery fills its own defaults at priority 10.
+    app.connect('config-inited', _disable_gallery_notebooks, priority=5)
     app.add_config_value('sphinx_examples_as_code_conf', {}, 'env')
 
     return {
