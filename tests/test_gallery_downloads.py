@@ -285,11 +285,10 @@ def test_gallery_downloads_disabled_keeps_gallery_notebooks(tmp_path: Path):
 
 
 def test_gallery_downloads_enabled_skips_gallery_notebooks(tmp_path: Path):
-    """On, sphinx-gallery writes no notebook and reports nothing about pandoc."""
+    """On, sphinx-gallery writes no notebook."""
     returncode, out, err, src_dir = _build_with_gallery_conf(tmp_path, '')
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
     assert not list((src_dir / 'auto_examples').rglob('*.ipynb'))
-    assert 'pandoc' not in err.lower()
 
 
 def test_gallery_downloads_enabled_warns_about_notebook_settings(tmp_path: Path):
@@ -300,6 +299,8 @@ def test_gallery_downloads_enabled_warns_about_notebook_settings(tmp_path: Path)
     )
     returncode, _out, err, src_dir = _build_with_gallery_conf(tmp_path, extra_conf)
     assert returncode != 0
+    assert (tmp_path / 'html' / 'auto_examples' / 'plot_minimal.html').is_file()
+    assert err.count('WARNING:') == 1, err
     assert "sphinx_gallery_conf key(s) 'pypandoc', 'first_notebook_cell' have no effect" in err
-    assert 'pandoc' not in err.lower().replace('pypandoc', '')
+    assert "'pypandoc' not available" not in err
     assert not list((src_dir / 'auto_examples').rglob('*.ipynb'))

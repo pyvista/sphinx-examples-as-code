@@ -1339,7 +1339,15 @@ def _disable_gallery_notebooks(_app: Sphinx, config: Config) -> None:
     gallery_conf = getattr(config, 'sphinx_gallery_conf', None)
     if not isinstance(gallery_conf, dict):
         return
-    set_keys = [key for key in _GALLERY_NOTEBOOK_KEYS if gallery_conf.get(key)]
+    from sphinx_gallery.gen_gallery import DEFAULT_GALLERY_CONF
+
+    overrides = {'pypandoc': False, 'notebook_extensions': set()}
+    set_keys = [
+        key
+        for key in _GALLERY_NOTEBOOK_KEYS
+        if gallery_conf.get(key, DEFAULT_GALLERY_CONF[key])
+        not in (DEFAULT_GALLERY_CONF[key], overrides.get(key))
+    ]
     if set_keys:
         logger.warning(
             'sphinx_gallery_conf key(s) %s have no effect: sphinx_examples_as_code writes the '
@@ -1348,8 +1356,7 @@ def _disable_gallery_notebooks(_app: Sphinx, config: Config) -> None:
             type='sphinx_examples_as_code',
             subtype='gallery_conf',
         )
-    gallery_conf['pypandoc'] = False
-    gallery_conf['notebook_extensions'] = set()
+    config.sphinx_gallery_conf = {**gallery_conf, **overrides}
 
 
 def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01

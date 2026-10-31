@@ -7,6 +7,7 @@ through a full build (mocked Sphinx app, hand-built doctree fragments).
 
 from __future__ import annotations
 
+import copy
 import json
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -17,6 +18,7 @@ import pytest
 from sphinx import addnodes
 from sphinx.errors import ConfigError
 from sphinx_gallery._doctree_links import code_links_block
+from sphinx_gallery.gen_gallery import DEFAULT_GALLERY_CONF
 
 import sphinx_examples_as_code as seac
 
@@ -2636,28 +2638,43 @@ def test_disable_gallery_notebooks_unset_conf_key():
 def test_disable_gallery_notebooks_on_overrides_quietly(
     gallery_downloads: object, caplog: pytest.LogCaptureFixture
 ):
-    gallery_conf = {'examples_dirs': 'examples'}
-    seac._disable_gallery_notebooks(Mock(), _gallery_config(gallery_downloads, gallery_conf))
-    assert gallery_conf == {
+    gallery_conf = {'examples_dirs': 'examples', 'notebook_extensions': set()}
+    config = _gallery_config(gallery_downloads, gallery_conf)
+    seac._disable_gallery_notebooks(Mock(), config)
+    assert config.sphinx_gallery_conf == {
         'examples_dirs': 'examples',
         'pypandoc': False,
         'notebook_extensions': set(),
     }
+    assert gallery_conf == {'examples_dirs': 'examples', 'notebook_extensions': set()}
     assert caplog.records == []
+
+
+def test_disable_gallery_notebooks_on_with_gallery_defaults(caplog: pytest.LogCaptureFixture):
+    defaults = copy.deepcopy(
+        {key: DEFAULT_GALLERY_CONF[key] for key in seac._GALLERY_NOTEBOOK_KEYS}
+    )
+    config = _gallery_config(True, DEFAULT_GALLERY_CONF)
+    seac._disable_gallery_notebooks(Mock(), config)
+    assert caplog.records == []
+    assert defaults == {key: DEFAULT_GALLERY_CONF[key] for key in seac._GALLERY_NOTEBOOK_KEYS}
+    assert config.sphinx_gallery_conf['notebook_extensions'] == set()
+    assert config.sphinx_gallery_conf['pypandoc'] is False
 
 
 def test_disable_gallery_notebooks_on_warns_about_set_keys(caplog: pytest.LogCaptureFixture):
     gallery_conf = {
-        'pypandoc': True,
-        'notebook_extensions': set(),
+        'pypandoc': {},
+        'notebook_extensions': {'.py', '.txt'},
         'first_notebook_cell': '%matplotlib inline',
+        'last_notebook_cell': None,
         'notebook_images': True,
     }
-    seac._disable_gallery_notebooks(Mock(), _gallery_config(True, gallery_conf))
-    assert gallery_conf['pypandoc'] is False
-    assert gallery_conf['notebook_extensions'] == set()
+    config = _gallery_config(True, gallery_conf)
+    seac._disable_gallery_notebooks(Mock(), config)
+    assert config.sphinx_gallery_conf['pypandoc'] is False
+    assert config.sphinx_gallery_conf['notebook_extensions'] == set()
     [record] = caplog.records
     assert record.levelname == 'WARNING'
-    assert (
-        "'pypandoc', 'first_notebook_cell', 'notebook_images' have no effect" in record.getMessage()
-    )
+    expected = "'pypandoc', 'notebook_extensions', 'first_notebook_cell', 'notebook_images'"
+    assert f'{expected} have no effect' in record.getMessage()
