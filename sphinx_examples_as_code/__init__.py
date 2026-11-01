@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+from dataclasses import replace
 import functools
 import hashlib
 import importlib.metadata
@@ -970,6 +971,17 @@ def _write_jupyter_notebook(app: Sphinx, name: str, notebook: dict) -> str:
     return _write_download_file(app, name, _FMT_JUPYTER, json.dumps(notebook, indent=1))
 
 
+def _title_first(cells: list) -> list:
+    """Move marimo's leading ``import marimo as mo`` cell below the title cell after it."""
+    if (
+        len(cells) > 1
+        and cells[0].code == 'import marimo as mo'
+        and cells[1].code.startswith('mo.md(')
+    ):
+        return [cells[1], cells[0], *cells[2:]]
+    return cells
+
+
 def _drop_future_imports(source: list[str]) -> list[str]:
     """Remove the lines of every ``from __future__`` import that has its lines to itself."""
     try:
@@ -997,7 +1009,9 @@ def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict, header: str =
         else cell
         for cell in notebook['cells']
     ]
-    source = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells})).to_py()
+    converted = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells}))
+    ir = converted.ir
+    source = type(converted)(replace(ir, cells=_title_first(ir.cells))).to_py()
     return _write_download_file(app, name, _FMT_MARIMO, header + source)
 
 
@@ -1068,6 +1082,66 @@ def _keep_pin(requirement: str, pin: str | None) -> str:
         return requirement
     parsed.specifier = Requirement(pin).specifier
     return str(parsed)
+
+
+_QUOTED = re.compile(r'"[^"]*"|\'[^\']*\'')
+_MARKER_WORDS = {'and', 'or', 'not', 'in'}
+
+
+def _depends_only_on_extras(requirement: Requirement, extras: frozenset[str]) -> bool:
+    """Check whether ``requirement`` applies with ``extras`` on every platform and Python."""
+    if requirement.marker is None:
+        return True
+    names = set(re.findall(r'[A-Za-z_.]+', _QUOTED.sub('', str(requirement.marker))))
+    if names - _MARKER_WORDS != {'extra'}:
+        return False
+    return any(requirement.marker.evaluate({'extra': extra}) for extra in extras | {''})
+
+
+@functools.cache
+def _installed_requirements(name: str, extras: frozenset[str]) -> frozenset[Requirement]:
+    """Return the unconditional requirements of an installed distribution with ``extras``."""
+    try:
+        requires = importlib.metadata.requires(name) or []
+    except importlib.metadata.PackageNotFoundError:
+        return frozenset()
+    parsed = (Requirement(req) for req in requires)
+    return frozenset(req for req in parsed if _depends_only_on_extras(req, extras))
+
+
+def _transitive_names(requirement: str) -> set[str]:
+    """Return the normalized names every install of ``requirement`` pulls in, itself excluded."""
+    root = Requirement(requirement)
+    seen: set[tuple[str, frozenset[str]]] = set()
+    todo = [(canonicalize_name(root.name), frozenset(root.extras))]
+    names: set[str] = set()
+    while todo:
+        key = todo.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        for req in _installed_requirements(*key):
+            names.add(canonicalize_name(req.name))
+            todo.append((canonicalize_name(req.name), frozenset(req.extras)))
+    names.discard(canonicalize_name(root.name))
+    return names
+
+
+def _drop_covered(deps: list[str]) -> list[str]:
+    """Drop each bare-name dependency that another listed dependency already installs."""
+    pulled = {dep: _transitive_names(dep) for dep in deps}
+    names = {dep: _canonical_name(dep) for dep in deps}
+
+    def covered(dep: str) -> bool:
+        if dep != Requirement(dep).name:
+            return False
+        return any(
+            names[dep] in pulled[other] and names[other] not in pulled[dep]
+            for other in deps
+            if other != dep
+        )
+
+    return [dep for dep in deps if not covered(dep)]
 
 
 @dataclass(frozen=True)
@@ -1297,10 +1371,12 @@ def _build_download_entries(
         cap = _python_upper_bound(deps[fmt], project.name if project else None)
         return _python_range(floor, cap)
 
+    listed = {fmt: _drop_covered(fmt_deps) for fmt, fmt_deps in deps.items()}
+
     def header_for(fmt: str, run_line: str) -> str:
         if not deps:
             return ''
-        return _script_metadata_header(deps[fmt], requires_python_for(fmt), run_line)
+        return _script_metadata_header(listed[fmt], requires_python_for(fmt), run_line)
 
     entries = []
     for fmt in _FORMAT_ORDER:
@@ -1313,7 +1389,7 @@ def _build_download_entries(
             rel_path = _write_python_script(app, name, header + source)
         elif fmt == _FMT_JUPYTER:
             run_line = (
-                _jupyter_run_line(deps[fmt], requires_python_for(fmt), filename) if deps else None
+                _jupyter_run_line(listed[fmt], requires_python_for(fmt), filename) if deps else None
             )
             rel_path = _write_jupyter_notebook(app, name, notebook_for(run_line))
         else:
