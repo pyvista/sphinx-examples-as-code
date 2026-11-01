@@ -936,8 +936,9 @@ def _build_notebook(cells: list[tuple[str, list[str]]]) -> dict:
 
 
 def _download_filename(name: str, fmt: str) -> str:
-    """Return the file name a download is written under, e.g. ``pyvista_read.py``."""
-    safe_name = name.replace('.', '_') if name else 'example'
+    """Return the file name a download is written under, e.g. ``Plotter_show.py``."""
+    # Drop the top-level package, e.g. pyvista.Plotter.show -> Plotter.show.
+    safe_name = name.partition('.')[2].replace('.', '_') if '.' in name else name or 'example'
     return f'{safe_name}{_SUFFIXES[fmt]}'
 
 

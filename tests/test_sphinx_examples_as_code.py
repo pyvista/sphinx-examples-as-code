@@ -1486,10 +1486,10 @@ def test_footer_segment_default_footer_jupyter_links_clickable():
 
 def test_write_python_script_writes_file_with_32_char_digest(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
-    rel_path = seac._write_python_script(app, 'pkg.func', 'x = 1\n')
+    rel_path = seac._write_python_script(app, 'pkg.Class.func', 'x = 1\n')
     digest, filename = rel_path.split('/')
     assert len(digest) == 32
-    assert filename == 'pkg_func.py'
+    assert filename == 'Class_func.py'
     assert (tmp_path / '_downloads' / digest / filename).read_text() == 'x = 1\n'
 
 
@@ -1614,6 +1614,19 @@ def test_build_notebook_valid_nbformat():
     nbformat.validate(node)  # raises if invalid
 
 
+@pytest.mark.parametrize(
+    ('name', 'fmt', 'expected'),
+    [
+        ('pyvista.ImageDataFilters.resample', 'marimo', 'ImageDataFilters_resample_marimo.py'),
+        ('pyvista.read', 'python', 'read.py'),
+        ('index-example-1', 'jupyter', 'index-example-1.ipynb'),
+        ('', 'python', 'example.py'),
+    ],
+)
+def test_download_filename_drops_top_level_package(name: str, fmt: str, expected: str):
+    assert seac._download_filename(name, fmt) == expected
+
+
 # ---------------------------------------------------------------------------
 # _write_jupyter_notebook
 # ---------------------------------------------------------------------------
@@ -1622,10 +1635,10 @@ def test_build_notebook_valid_nbformat():
 def test_write_jupyter_notebook_writes_valid_json(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     notebook = seac._build_notebook([('code', ['x = 1'])])
-    rel_path = seac._write_jupyter_notebook(app, 'pkg.func', notebook)
+    rel_path = seac._write_jupyter_notebook(app, 'pkg.Class.func', notebook)
     digest, filename = rel_path.split('/')
     assert len(digest) == 32
-    assert filename == 'pkg_func.ipynb'
+    assert filename == 'Class_func.ipynb'
     written = (tmp_path / '_downloads' / digest / filename).read_text()
     assert json.loads(written) == notebook
 

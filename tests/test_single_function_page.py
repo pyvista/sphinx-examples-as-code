@@ -34,7 +34,7 @@ def test_download_named_after_the_function_not_the_docname(tmp_path: Path):
     python_path = python_files[0]
 
     # not "index-example-1" (the docname-derived fallback name)
-    assert python_path.stem == 'mymodule_download_bunny'
+    assert python_path.stem == 'download_bunny'
 
     lines = python_path.read_text(encoding='utf-8').splitlines()
     assert lines[0] == '# Examples from mymodule.download_bunny'

@@ -228,7 +228,7 @@ def test_table_becomes_an_rst_simple_table_in_python(built: tuple[Path, list[Pat
 
 def test_table_becomes_a_markdown_table_in_jupyter(built_jupyter_notebooks: list[Path]):
     """The same table is a Markdown pipe table in a notebook's markdown cell."""
-    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_table')
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'case_table')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     lines = [
         line.rstrip()
@@ -246,9 +246,7 @@ def test_table_becomes_a_markdown_table_in_jupyter(built_jupyter_notebooks: list
 
 def test_header_less_table_gets_a_blank_markdown_header(built_jupyter_notebooks: list[Path]):
     """A Markdown pipe table needs a header row, so one is left blank."""
-    nb_path = next(
-        p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_table_without_header'
-    )
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'case_table_without_header')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     lines = [
         line.rstrip()
@@ -301,7 +299,7 @@ def test_header_format(built: tuple[Path, list[Path]]):
 
 def test_header_format_jupyter_uses_atx(built_jupyter_notebooks: list[Path]):
     """The same header, in .ipynb, is a single ATX level-1 line -- no underline."""
-    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_note')
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'case_note')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     header_cell = notebook['cells'][0]
     lines = [line.rstrip() for line in header_cell['source']]
@@ -451,9 +449,7 @@ def test_jupyter_notebook_code_cells_match_python_code(
         line for line in python_src.splitlines() if line and not line.startswith('#')
     ]
 
-    notebook_path = next(
-        p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_combined'
-    )
+    notebook_path = next(p for p in built_jupyter_notebooks if p.stem == 'case_combined')
     notebook = json.loads(notebook_path.read_text(encoding='utf-8'))
     code_cells = [c for c in notebook['cells'] if c['cell_type'] == 'code']
     notebook_code_lines = [
@@ -520,11 +516,7 @@ def test_base_url_unset_no_links_anywhere(
     python_src = _read(built[1], 'case_regular_xref_for_base_url')
     assert 'http' not in python_src
 
-    nb_path = next(
-        p
-        for p in built_jupyter_notebooks
-        if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
-    )
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'case_regular_xref_for_base_url')
     nb_text = nb_path.read_text(encoding='utf-8')
     assert 'http' not in nb_text
     assert '](' not in nb_text  # no markdown links
@@ -562,7 +554,7 @@ def test_base_url_set_resolves_links(tmp_path: Path):
     assert '`docstring_cases.Sample`' in regular_python
 
     regular_nb = next(
-        p for p in jupyter_files if p.stem == 'docstring_cases_case_regular_xref_for_base_url'
+        p for p in jupyter_files if p.stem == 'case_regular_xref_for_base_url'
     ).read_text(encoding='utf-8')
     assert '[`docstring_cases.Sample`](https://docs.example.com/' in regular_nb
 
@@ -601,7 +593,7 @@ def test_markdown_cells_use_hard_line_breaks(built_jupyter_notebooks: list[Path]
     with no blank line between -- not the header cell, which is a single
     ATX heading line with nothing else to connect to.
     """
-    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'docstring_cases_case_note')
+    nb_path = next(p for p in built_jupyter_notebooks if p.stem == 'case_note')
     notebook = json.loads(nb_path.read_text(encoding='utf-8'))
     note_cell = next(
         c
@@ -632,9 +624,7 @@ def test_html_baseurl_missing_scheme_disables_links_without_failing_build(tmp_pa
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
-    nb_path = next(
-        (html_dir / '_downloads').rglob('docstring_cases_case_regular_xref_for_base_url.ipynb')
-    )
+    nb_path = next((html_dir / '_downloads').rglob('case_regular_xref_for_base_url.ipynb'))
     nb_text = nb_path.read_text(encoding='utf-8')
     assert '](' not in nb_text  # no markdown links -- same as html_baseurl unset entirely
 
@@ -653,9 +643,7 @@ def test_base_url_missing_trailing_slash_still_resolves_subpath(tmp_path: Path):
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
-    nb_path = next(
-        (html_dir / '_downloads').rglob('docstring_cases_case_regular_xref_for_base_url.ipynb')
-    )
+    nb_path = next((html_dir / '_downloads').rglob('case_regular_xref_for_base_url.ipynb'))
     nb_text = nb_path.read_text(encoding='utf-8')
     assert 'https://docs.example.com/en/stable/docstring_cases.html' in nb_text
 

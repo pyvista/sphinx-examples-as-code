@@ -68,7 +68,9 @@ sphinx_examples_as_code_conf = {
   offered in that order regardless of how the list is written. Without marimo 0.14 or
   newer installed, the default skips the marimo download, and a `formats` that names
   `'marimo'` (in `conf.py` or through `-D`) stops the build with a configuration error. An unknown format raises a configuration error too;
-  the old `'py'` and `'ipynb'` names say what replaced them.
+  the old `'py'` and `'ipynb'` names say what replaced them. `<name>` is the documented
+  object's full name without its top-level package, e.g. `Plotter_show` for
+  `pyvista.Plotter.show`, or the gallery example's file name.
 - `link_labels`: the text of the download link(s) themselves, per format. Set only the
   format(s) you want to change; any left unset keep reading their own default shown above.
 - `gallery_downloads`: opt-in takeover of
@@ -117,7 +119,8 @@ imports, plus any `dependencies` set for its format, and says how to run it:
   needed, so the command works in bash, zsh, PowerShell and cmd. An argument containing
   `"`, `$`, a backtick, `\`, `%` or a `!` not followed by `=` is single-quoted instead,
   which cmd does not understand.
-- marimo notebooks start with the same `# /// script` block, which also lists `marimo`,
+- marimo notebooks start with the same `# /// script` block, which also lists `marimo`
+  unless another dependency installs it,
   followed by `# Open this notebook with: uvx marimo edit --sandbox <name>_marimo.py`.
 - Each run command is followed by a line linking to
   [uv's installation guide](https://docs.astral.sh/uv/getting-started/installation/).
@@ -126,7 +129,9 @@ Imports are read from the code, not run. Each imported top-level module maps to 
 project that provides it in the environment building the docs; standard-library
 modules, relative imports and modules no single installed project provides are left
 out. Projects the code needs but never imports, such as an optional backend, go in
-`dependencies`.
+`dependencies`. A dependency with no version or extras of its own is left out when another listed
+one already installs it on every platform, e.g. `numpy` and `marimo` next to
+`pyvista[marimo]`.
 
 The project named by Sphinx's own `project` setting (e.g. `project = 'PyVista'`) gets
 extra treatment when an example imports it and it is installed: its dependency becomes
