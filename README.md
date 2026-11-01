@@ -54,6 +54,9 @@ sphinx_examples_as_code_conf = {
         'jupyter': 'Download Jupyter notebook',
         'marimo': 'Download marimo notebook',
     },
+    'script_metadata': False,
+    'dependencies': {},
+    'requires_python': None,
 }
 ```
 
@@ -80,6 +83,17 @@ sphinx_examples_as_code_conf = {
   Markdown link in notebooks, and renders inline as `text url` in Python scripts. Plain
   text with no markup at all becomes one comment line per line of text, and
   blank-line-separated paragraphs stay separated.
+- `script_metadata`: `True` adds each download's dependencies and a one-line run
+  command. See [Dependencies and run commands](#dependencies-and-run-commands) below.
+  `False` (default) adds neither.
+- `dependencies`: extra PEP 508 requirements per format, added to the detected ones, e.g.
+  `{'jupyter': ['pyvista[jupyter]']}`. An entry naming a detected project replaces it,
+  so `{'python': ['pyvista>=0.46']}` sets its version. An entry without a version keeps
+  the automatic pin described below. Only used with `script_metadata` on.
+- `requires_python`: a `requires-python` specifier for the dependency block, e.g.
+  `'>=3.10'`. `None` (default) derives one from the dependencies instead; see
+  [Dependencies and run commands](#dependencies-and-run-commands). Only used with
+  `script_metadata` on.
 
 An unrecognized key raises a configuration error at build start.
 
@@ -90,6 +104,46 @@ Leave it unset and no links are generated anywhere.
 Overriding a single key from the command line works via a dotted `-D` flag, e.g.
 `-D sphinx_examples_as_code_conf.link_position=bottom` -- this only touches that one
 key, leaving the rest (`conf.py`'s values, or the defaults) alone.
+
+## Dependencies and run commands
+
+With `script_metadata` on, each download lists the third-party projects its code
+imports, plus any `dependencies` set for its format, and says how to run it:
+
+- Python scripts start with a [PEP 723](https://peps.python.org/pep-0723/) `# /// script`
+  block, followed by `# Run this script with: uv run <name>.py`.
+- Jupyter notebooks say `` Open this notebook with: `uvx --python "<requires-python>" --from jupyterlab --with <dependency> ... jupyter-lab <name>.ipynb` `` in their first cell,
+  with `--python` only when there is a `requires-python`. Arguments are double-quoted where
+  needed, so the command works in bash, zsh, PowerShell and cmd. An argument containing
+  `"`, `$`, a backtick, `\`, `%` or a `!` not followed by `=` is single-quoted instead,
+  which cmd does not understand.
+- marimo notebooks start with the same `# /// script` block, which also lists `marimo`,
+  followed by `# Open this notebook with: uvx marimo edit --sandbox <name>.marimo.py`.
+- Each run command is followed by a line linking to
+  [uv's installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+
+Imports are read from the code, not run. Each imported top-level module maps to the
+project that provides it in the environment building the docs; standard-library
+modules, relative imports and modules no single installed project provides are left
+out. Projects the code needs but never imports, such as an optional backend, go in
+`dependencies`.
+
+The project named by Sphinx's own `project` setting (e.g. `project = 'PyVista'`) gets
+extra treatment when an example imports it and it is installed: its dependency becomes
+`<name>>=X.Y`, the installed release's major and minor version, or plain `<name>` for a
+pre-release or dev build.
+
+Unless `requires_python` is set, the block's `requires-python` combines:
+
+- that project's own `Requires-Python`, e.g. `>=3.10`, when it is listed;
+- `<3.N`, one minor version above the newest Python named in the `Programming Language ::
+  Python :: 3.X` classifiers of that project and of every listed dependency installed
+  from a platform-specific wheel, as installed in the environment building the docs.
+  Pure-Python dependencies and dependencies without such classifiers don't count, and
+  the bound is dropped when it would exclude every Python the project's own
+  `Requires-Python` allows.
+
+With neither, the line is left out.
 
 ## Conversion rules
 

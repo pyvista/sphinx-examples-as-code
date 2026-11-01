@@ -32,7 +32,7 @@ classifiers = [
   'Programming Language :: Python :: 3.14',
   'Topic :: Scientific/Engineering :: Visualization',
 ]
-dependencies = ['pyvista>=0.48']
+dependencies = ['packaging>=22', 'pyvista>=0.48']
 description = 'Sphinx extension for converting docstring examples into downloadable code.'
 dynamic = ['version']
 keywords = ['download', 'examples', 'sphinx']

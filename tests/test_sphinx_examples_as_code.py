@@ -1961,6 +1961,7 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'script_metadata': False,
     }
 
     doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
@@ -2382,6 +2383,7 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
         'gallery_downloads': False,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'script_metadata': False,
     }
 
     doctree = _build_gallery_doctree()
@@ -2401,6 +2403,7 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
         'gallery_downloads': True,
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
+        'script_metadata': False,
     }
 
     doctree = _build_gallery_doctree()
@@ -2408,6 +2411,24 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
 
     assert not any(seac._has_class(n, seac._GALLERY_FOOTER_CLASS) for n in doctree.findall())
     assert any(isinstance(n, addnodes.download_reference) for n in doctree.findall())
+
+
+def test_process_doctree_gallery_mode_script_metadata(tmp_path: Path):
+    app = Mock(outdir=str(tmp_path))
+    app.builder.download_support = True
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'gallery_downloads': True,
+        'footer': None,
+        'script_metadata': True,
+    }
+    app.config.project = None
+
+    seac._process_doctree(app, _build_gallery_doctree(), 'plot_minimal')
+
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert written.read_text(encoding='utf-8').startswith('# /// script\n')
 
 
 # ---------------------------------------------------------------------------
@@ -2757,3 +2778,428 @@ def test_disable_gallery_notebooks_on_warns_about_set_keys(caplog: pytest.LogCap
     assert record.levelname == 'WARNING'
     expected = "'pypandoc', 'notebook_extensions', 'first_notebook_cell', 'notebook_images'"
     assert f'{expected} have no effect' in record.getMessage()
+
+
+# ---------------------------------------------------------------------------
+# script_metadata (PEP 723 dependencies and run lines)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('requirement', 'expected'),
+    [('numpy', 'numpy'), ('PyVista[jupyter]>=0.46', 'pyvista'), ('Foo_Bar.baz', 'foo-bar-baz')],
+)
+def test_canonical_name(requirement: str, expected: str):
+    assert seac._canonical_name(requirement) == expected
+
+
+def test_imported_distributions_skips_stdlib_relative_and_unknown():
+    source = (
+        'from __future__ import annotations\n'
+        'import json, os.path\n'
+        'import numpy as np\n'
+        'from docutils.nodes import Text\n'
+        'from . import sibling\n'
+        'import not_a_real_module_xyz\n'
+    )
+    assert seac._imported_distributions(source) == ['docutils', 'numpy']
+
+
+def test_imported_distributions_finds_nested_imports():
+    assert seac._imported_distributions('def f():\n    import numpy\n') == ['numpy']
+
+
+def test_imported_distributions_syntax_error_is_empty():
+    assert seac._imported_distributions('import (') == []
+
+
+def test_distribution_for_ambiguous_module_is_none(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(seac, '_module_distributions', lambda: {'shared': ['a', 'b']})
+    assert seac._distribution_for('shared') is None
+
+
+def test_distribution_for_falls_back_to_distribution_name(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(seac, '_module_distributions', dict)
+    assert seac._distribution_for('numpy') == 'numpy'
+
+
+def test_script_dependencies_extra_overrides_detected():
+    deps = seac._script_dependencies('import numpy\n', ['NumPy>=2', 'pooch'])
+    assert deps == ['NumPy>=2', 'pooch']
+
+
+def test_script_metadata_header():
+    header = seac._script_metadata_header(['numpy', 'a[b]'], '>=3.10', 'Run this script with: x')
+    assert header == (
+        '# /// script\n'
+        '# requires-python = ">=3.10"\n'
+        '# dependencies = [\n'
+        '#     "numpy",\n'
+        '#     "a[b]",\n'
+        '# ]\n'
+        '# ///\n'
+        '# Run this script with: x\n'
+        '# Install uv first: https://docs.astral.sh/uv/getting-started/installation/\n'
+        '\n'
+    )
+
+
+@pytest.fixture
+def fake_classifiers(monkeypatch: pytest.MonkeyPatch):
+    """Serve classifiers from a dict, every listed distribution compiled unless ``pure``."""
+
+    def install(classifiers: dict[str, list[str] | None], pure: tuple[str, ...] = ()) -> None:
+        def metadata(name: str) -> Mock:
+            if name not in classifiers:
+                raise seac.importlib.metadata.PackageNotFoundError(name)
+            return Mock(get_all=lambda _key: classifiers[name])
+
+        monkeypatch.setattr(seac.importlib.metadata, 'metadata', metadata)
+        monkeypatch.setattr(
+            seac, '_ships_compiled_wheel', lambda name: name in classifiers and name not in pure
+        )
+
+    seac._newest_python_minor.cache_clear()
+    yield install
+    seac._newest_python_minor.cache_clear()
+
+
+def test_python_upper_bound_takes_lowest_newest_version(fake_classifiers):
+    fake_classifiers(
+        {
+            'pyvista': [f'Programming Language :: Python :: 3.{n}' for n in range(10, 15)],
+            'numpy': [
+                'Programming Language :: Python :: 3',
+                'Programming Language :: Python :: 3.15',
+            ],
+            'vtk': None,
+        }
+    )
+    assert seac._python_upper_bound(['numpy', 'PyVista[jupyter]', 'vtk', 'missing']) == '<3.15'
+
+
+def test_python_upper_bound_none_without_classifiers(fake_classifiers):
+    fake_classifiers({'vtk': []})
+    assert seac._python_upper_bound(['vtk', 'missing']) is None
+
+
+def test_python_upper_bound_skips_pure_dependencies_except_project(fake_classifiers):
+    fake_classifiers(
+        {
+            'pyvista': ['Programming Language :: Python :: 3.14'],
+            'cycler': ['Programming Language :: Python :: 3.12'],
+            'numpy': ['Programming Language :: Python :: 3.15'],
+        },
+        pure=('pyvista', 'cycler'),
+    )
+    deps = ['cycler', 'numpy', 'pyvista']
+    assert seac._python_upper_bound(deps) == '<3.16'
+    assert seac._python_upper_bound(deps, project='pyvista') == '<3.15'
+
+
+def test_ships_compiled_wheel():
+    seac._ships_compiled_wheel.cache_clear()
+    assert seac._ships_compiled_wheel('numpy')
+    assert not seac._ships_compiled_wheel('docutils')
+    assert not seac._ships_compiled_wheel('not-an-installed-project')
+
+
+@pytest.mark.parametrize(
+    ('floor', 'cap', 'expected'),
+    [
+        ('>=3.10', '<3.15', '>=3.10,<3.15'),
+        ('>=3.10', '<3.10', '>=3.10'),
+        ('>=3.13', '<3.13', '>=3.13'),
+        (None, '<3.15', '<3.15'),
+        ('>=3.10', None, '>=3.10'),
+        (None, None, None),
+    ],
+)
+def test_python_range(floor: str | None, cap: str | None, expected: str | None):
+    assert seac._python_range(floor, cap) == expected
+
+
+def test_newest_python_minor_missing_distribution(fake_classifiers):
+    fake_classifiers({})
+    assert seac._newest_python_minor('missing') is None
+
+
+def test_newest_python_minor_is_cached(fake_classifiers):
+    fake_classifiers({'numpy': ['Programming Language :: Python :: 3.14']})
+    assert seac._newest_python_minor('numpy') == 14
+    fake_classifiers({'numpy': ['Programming Language :: Python :: 3.15']})
+    assert seac._newest_python_minor('numpy') == 14
+
+
+def test_script_metadata_derives_requires_python(tmp_path: Path, fake_classifiers):
+    fake_classifiers({'numpy': ['Programming Language :: Python :: 3.14']})
+    app = Mock(outdir=str(tmp_path))
+    app.builder.download_support = True
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'script_metadata': True,
+    }
+    app.config.project = None
+    seac._process_doctree(app, _parse('.. rubric:: Examples\n\n>>> import numpy'), 'page')
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert '# requires-python = "<3.15"\n' in written.read_text(encoding='utf-8')
+
+
+def test_script_metadata_header_no_dependencies():
+    header = seac._script_metadata_header([], None, 'run')
+    assert header == (
+        f'# /// script\n# dependencies = []\n# ///\n# run\n# {seac._UV_INSTALL_LINE}\n\n'
+    )
+
+
+def test_jupyter_run_line_quotes_extras():
+    line = seac._jupyter_run_line(['numpy', 'pyvista[jupyter]'], None, 'x.ipynb')
+    assert line == (
+        'Open this notebook with: `uvx --from jupyterlab --with numpy '
+        '--with "pyvista[jupyter]" jupyter-lab x.ipynb`'
+    )
+
+
+def test_jupyter_run_line_passes_requires_python():
+    line = seac._jupyter_run_line(['numpy'], '<3.15', 'x.ipynb')
+    assert line == (
+        'Open this notebook with: `uvx --python "<3.15" --from jupyterlab --with numpy '
+        'jupyter-lab x.ipynb`'
+    )
+
+
+def test_jupyter_run_line_marker_double_quotes_become_single():
+    line = seac._jupyter_run_line(['numpy; python_version<"3.12"'], None, 'x.ipynb')
+    assert '--with "numpy; python_version<\'3.12\'" ' in line
+
+
+@pytest.mark.parametrize(
+    ('arg', 'expected'),
+    [
+        ('numpy', 'numpy'),
+        ('numpy>=2', '"numpy>=2"'),
+        ('pyvista[jupyter]', '"pyvista[jupyter]"'),
+        ('==3.12', '"==3.12"'),
+        ('numpy!=2.0.0', '"numpy!=2.0.0"'),
+        ('a^b', '"a^b"'),
+        ('a!b', "'a!b'"),
+        ('pkg @ https://x.org/a%20b.whl', "'pkg @ https://x.org/a%20b.whl'"),
+    ],
+)
+def test_quote_shell_arg(arg: str, expected: str):
+    assert seac._quote_shell_arg(arg) == expected
+
+
+def _write_with_metadata(tmp_path: Path, formats: list[str]) -> tuple[str, str]:
+    app = Mock(outdir=str(tmp_path))
+    _doctree, parent, start, end, heading = _build_examples_doctree(
+        '.. rubric:: Examples\n\n>>> import json\n>>> import numpy as np\n>>> x = np.zeros(3)'
+    )
+    script_metadata = {
+        'dependencies': {'jupyter': ['ipywidgets']},
+        'requires_python': '>=3.10',
+        'project': None,
+    }
+    seac._process_span(
+        app,
+        'page',
+        parent,
+        start,
+        end,
+        heading,
+        1,
+        'top',
+        formats,
+        None,
+        seac._DEFAULT_LINK_LABELS,
+        script_metadata,
+    )
+    (path,) = (p for p in (tmp_path / '_downloads').rglob('*') if p.is_file())
+    return path.name, path.read_text(encoding='utf-8')
+
+
+def test_script_metadata_python(tmp_path: Path):
+    name, source = _write_with_metadata(tmp_path, ['python'])
+    assert source.startswith(
+        '# /// script\n# requires-python = ">=3.10"\n# dependencies = [\n#     "numpy",\n# ]\n'
+        f'# ///\n# Run this script with: uv run {name}\n# {seac._UV_INSTALL_LINE}\n\n'
+        '# Examples from page-example-1\n'
+    )
+
+
+def test_script_metadata_jupyter(tmp_path: Path):
+    name, source = _write_with_metadata(tmp_path, ['jupyter'])
+    first_cell = json.loads(source)['cells'][0]
+    assert [line.rstrip() for line in first_cell['source']] == [
+        '# Examples from page-example-1',
+        '',
+        (
+            'Open this notebook with: `uvx --python ">=3.10" --from jupyterlab '
+            f'--with ipywidgets --with numpy jupyter-lab {name}`'
+        ),
+        seac._UV_INSTALL_LINE,
+    ]
+
+
+def test_script_metadata_marimo(tmp_path: Path):
+    name, source = _write_with_metadata(tmp_path, ['marimo'])
+    header = (
+        '# /// script\n# requires-python = ">=3.10"\n# dependencies = [\n'
+        '#     "marimo",\n#     "numpy",\n# ]\n'
+        f'# ///\n# Open this notebook with: uvx marimo edit --sandbox {name}\n'
+        f'# {seac._UV_INSTALL_LINE}\n\n'
+    )
+    assert source.startswith(header)
+    assert 'Open this notebook' not in source.removeprefix(header)
+
+
+def test_process_doctree_script_metadata_enabled(tmp_path: Path):
+    app = Mock(outdir=str(tmp_path))
+    app.builder.download_support = True
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'script_metadata': True,
+    }
+    app.config.project = None
+    seac._process_doctree(app, _parse('.. rubric:: Examples\n\n>>> import numpy'), 'page')
+    written = next((tmp_path / '_downloads').rglob('*.py'))
+    assert '#     "numpy",' in written.read_text(encoding='utf-8')
+
+
+@pytest.mark.parametrize(('raw', 'expected'), [('0', False), ('1', True)])
+def test_coerce_conf_value_script_metadata_bool_strings(raw: str, expected: bool):
+    assert seac._coerce_conf_value('script_metadata', raw) is expected
+
+
+@pytest.mark.parametrize(
+    ('dependencies', 'match'),
+    [
+        (['numpy'], 'must be a dict'),
+        ({'pdf': ['numpy']}, r"unknown format\(s\) \['pdf'\]"),
+        ({'ipynb': ['numpy']}, "'ipynb' is now 'jupyter'"),
+        ({'python': 'numpy'}, r"\['python'\] must be a list of requirement strings"),
+        ({'python': [1]}, r"\['python'\] must be a list of requirement strings"),
+        ({'python': [' ']}, r"\['python'\] must be a list of requirement strings"),
+        ({'python': ['git+https://x.org/a']}, r"\['python'\] must be a list of requirement"),
+    ],
+)
+def test_finalize_conf_invalid_dependencies_raises(dependencies: object, match: str):
+    config = Mock(sphinx_examples_as_code_conf={'dependencies': dependencies})
+    with pytest.raises(ConfigError, match=match):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_accepts_dependencies():
+    dependencies = {'jupyter': ['pyvista[jupyter]', 'numpy; python_version<"3.12"']}
+    config = Mock(sphinx_examples_as_code_conf={'dependencies': dependencies})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['dependencies'] == dependencies
+
+
+@pytest.mark.parametrize('requires_python', [3.10, '', ['>=3.10'], '3.10'])
+def test_finalize_conf_invalid_requires_python_raises(requires_python: object):
+    config = Mock(sphinx_examples_as_code_conf={'requires_python': requires_python})
+    with pytest.raises(ConfigError, match=r"\['requires_python'\] must be a specifier string"):
+        seac._finalize_conf(Mock(), config)
+
+
+def test_finalize_conf_accepts_requires_python_string():
+    config = Mock(sphinx_examples_as_code_conf={'requires_python': '>=3.10'})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['requires_python'] == '>=3.10'
+
+
+@pytest.fixture
+def clear_documented_project():
+    seac._documented_project.cache_clear()
+    yield
+    seac._documented_project.cache_clear()
+
+
+def _installed_numpy() -> seac._DocumentedProject:
+    dist = seac.importlib.metadata.distribution('numpy')
+    major, minor = dist.version.split('.')[:2]
+    return seac._DocumentedProject(
+        'numpy', f'numpy>={major}.{minor}', dist.metadata['Requires-Python']
+    )
+
+
+@pytest.mark.parametrize('project', [None, '', 'Not An Installed Project'])
+def test_documented_project_missing(project: str | None, clear_documented_project):
+    assert seac._documented_project(project) is None
+
+
+def test_documented_project_installed(clear_documented_project):
+    assert seac._documented_project('NumPy') == _installed_numpy()
+
+
+@pytest.mark.parametrize(
+    ('version', 'pin'),
+    [
+        ('0.50.dev0', None),
+        ('0.49.3.dev12+g1234abc', None),
+        ('1.0rc1', None),
+        ('not a version', None),
+        ('0.49.2', 'pyvista>=0.49'),
+        ('1.2.post1', 'pyvista>=1.2'),
+        ('0.49.0+cu121', 'pyvista>=0.49'),
+        ('2', 'pyvista>=2.0'),
+    ],
+)
+def test_documented_project_pin(
+    version: str, pin: str | None, monkeypatch: pytest.MonkeyPatch, clear_documented_project
+):
+    dist = Mock(version=version, metadata={'Requires-Python': '>=3.10'})
+    dist.name = 'pyvista'
+    monkeypatch.setattr(seac.importlib.metadata, 'distribution', lambda _name: dist)
+    assert seac._documented_project('PyVista') == seac._DocumentedProject('pyvista', pin, '>=3.10')
+
+
+def test_script_dependencies_extra_without_version_keeps_pin():
+    pins = {'pyvista': 'pyvista>=0.49'}
+    deps = seac._script_dependencies('import pyvista\n', ['pyvista[jupyter]'], pins)
+    assert deps == ['pyvista[jupyter]>=0.49']
+
+
+def test_script_dependencies_pins_only_imported_projects():
+    pins = {'numpy': 'numpy>=2.0', 'pyvista': 'pyvista>=0.49'}
+    assert seac._script_dependencies('import numpy\n', [], pins) == ['numpy>=2.0']
+
+
+def test_script_dependencies_extra_overrides_pin():
+    pins = {'numpy': 'numpy>=2.0'}
+    assert seac._script_dependencies('import numpy\n', ['numpy<2'], pins) == ['numpy<2']
+
+
+def _python_source_for(tmp_path: Path, project: str | None, rst: str) -> str:
+    app = Mock(outdir=str(tmp_path))
+    app.builder.download_support = True
+    app.config.project = project
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'script_metadata': True,
+    }
+    seac._process_doctree(app, _parse(rst), 'page')
+    return next((tmp_path / '_downloads').rglob('*.py')).read_text(encoding='utf-8')
+
+
+def test_script_metadata_documented_project_floor_and_pin(
+    tmp_path: Path, fake_classifiers, clear_documented_project
+):
+    fake_classifiers({'numpy': ['Programming Language :: Python :: 3.14']})
+    numpy = _installed_numpy()
+    source = _python_source_for(tmp_path, 'NumPy', '.. rubric:: Examples\n\n>>> import numpy')
+    assert f'# requires-python = "{numpy.requires_python},<3.15"\n' in source
+    assert f'#     "{numpy.pin}",\n' in source
+
+
+def test_script_metadata_documented_project_not_imported(
+    tmp_path: Path, fake_classifiers, clear_documented_project
+):
+    fake_classifiers({'docutils': ['Programming Language :: Python :: 3.14']})
+    source = _python_source_for(tmp_path, 'NumPy', '.. rubric:: Examples\n\n>>> import docutils')
+    assert '# requires-python = "<3.15"\n' in source
+    assert 'numpy' not in source
