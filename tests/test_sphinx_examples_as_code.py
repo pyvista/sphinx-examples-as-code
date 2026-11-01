@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
@@ -1140,6 +1141,24 @@ def test_qualified_name_for_desc_ancestor():
     assert seac._qualified_name_for(heading, 'page', 1) == 'pkg.mod.func'
 
 
+@pytest.mark.parametrize(('desc_id', 'expected'), [('pkg.mod.func', 'mod.func'), ('func', 'func')])
+def test_download_stem_drops_top_level_package(desc_id: str, expected: str):
+    desc = addnodes.desc()
+    desc += addnodes.desc_signature(ids=[desc_id])
+    content = addnodes.desc_content()
+    heading = nodes.rubric()
+    content += heading
+    desc += content
+    assert seac._download_stem(heading, 'page', 1) == expected
+
+
+def test_download_stem_keeps_dotted_fallback_name():
+    section = nodes.section()
+    heading = nodes.rubric()
+    section += heading
+    assert seac._download_stem(heading, 'release.0.44', 1) == 'release.0.44-example-1'
+
+
 def test_qualified_name_for_fallback_no_desc_ancestor():
     section = nodes.section()
     heading = nodes.rubric()
@@ -1611,6 +1630,18 @@ def test_build_notebook_valid_nbformat():
     notebook = seac._build_notebook(cells)
     node = nbformat.from_dict(notebook)
     nbformat.validate(node)  # raises if invalid
+
+
+@pytest.mark.parametrize(
+    ('name', 'fmt', 'expected'),
+    [
+        ('ImageDataFilters.resample', 'marimo', 'ImageDataFilters_resample_marimo.py'),
+        ('plot_vtk9.4', 'python', 'plot_vtk9_4.py'),
+        ('', 'jupyter', 'example.ipynb'),
+    ],
+)
+def test_download_filename(name: str, fmt: str, expected: str):
+    assert seac._download_filename(name, fmt) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -3052,6 +3083,21 @@ def test_script_metadata_marimo(tmp_path: Path):
     )
     assert source.startswith(header)
     assert 'Open this notebook' not in source.removeprefix(header)
+    assert source.index('mo.md(') < source.index('import marimo as mo')
+
+
+@pytest.mark.parametrize(
+    ('codes', 'expected'),
+    [
+        (['import marimo as mo', 'mo.md("# T")', 'x = 1'], [1, 0, 2]),
+        (['import marimo as mo', 'x = 1'], [0, 1]),
+        (['mo.md("# T")', 'import marimo as mo'], [0, 1]),
+        (['import marimo as mo'], [0]),
+    ],
+)
+def test_title_first(codes: list[str], expected: list[int]):
+    cells = [SimpleNamespace(code=code) for code in codes]
+    assert seac._title_first(cells) == [cells[i] for i in expected]
 
 
 def test_process_doctree_script_metadata_enabled(tmp_path: Path):
@@ -3203,3 +3249,48 @@ def test_script_metadata_documented_project_not_imported(
     source = _python_source_for(tmp_path, 'NumPy', '.. rubric:: Examples\n\n>>> import docutils')
     assert '# requires-python = "<3.15"\n' in source
     assert 'numpy' not in source
+
+
+@pytest.fixture
+def fake_requires(monkeypatch: pytest.MonkeyPatch):
+    """Serve installed requirements from a dict."""
+
+    def install(requires: dict[str, list[str]]) -> None:
+        def fake(name: str) -> list[str]:
+            if name not in requires:
+                raise seac.importlib.metadata.PackageNotFoundError(name)
+            return requires[name]
+
+        monkeypatch.setattr(seac.importlib.metadata, 'requires', fake)
+
+    seac._installed_requirements.cache_clear()
+    yield install
+    seac._installed_requirements.cache_clear()
+
+
+def test_drop_covered_follows_extras_transitively(fake_requires):
+    fake_requires(
+        {
+            'pyvista': ['numpy>=1.21', 'trame-pyvista[marimo]>=0.3; extra == "marimo"'],
+            'trame-pyvista': ['marimo; extra == "marimo"'],
+        }
+    )
+    deps = ['marimo', 'numpy', 'pyvista[marimo]', 'scipy']
+    assert seac._drop_covered(deps) == ['pyvista[marimo]', 'scipy']
+    assert seac._drop_covered(['marimo', 'numpy', 'pyvista']) == ['marimo', 'pyvista']
+
+
+def test_drop_covered_keeps_pinned_platform_specific_and_cycles(fake_requires):
+    fake_requires(
+        {
+            'pyvista': ['numpy', 'pooch; sys_platform == "linux"', 'cycle'],
+            'cycle': ['pyvista'],
+        }
+    )
+    deps = ['cycle', 'numpy>=2', 'pooch', 'pyvista']
+    assert seac._drop_covered(deps) == deps
+
+
+def test_drop_covered_without_metadata_keeps_everything(fake_requires):
+    fake_requires({})
+    assert seac._drop_covered(['numpy', 'pyvista']) == ['numpy', 'pyvista']
