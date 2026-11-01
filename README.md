@@ -110,7 +110,9 @@ imports, plus any `dependencies` set for its format, and says how to run it:
 
 - Python scripts start with a [PEP 723](https://peps.python.org/pep-0723/) `# /// script`
   block, followed by `# Run this script with: uv run <name>.py`.
-- Jupyter notebooks say `` Open this notebook with: `uvx --python '<requires-python>' --from jupyterlab --with <dependency> ... jupyter-lab <name>.ipynb` `` in their first cell.
+- Jupyter notebooks say `` Open this notebook with: `uvx --python "<requires-python>" --from jupyterlab --with <dependency> ... jupyter-lab <name>.ipynb` `` in their first cell,
+  with `--python` only when there is a `requires-python`. Arguments are double-quoted where
+  needed, so the command works in bash, zsh, PowerShell and cmd.
 - marimo notebooks start with the same `# /// script` block, which also lists `marimo`,
   followed by `# Open this notebook with: uvx marimo edit --sandbox <name>.marimo.py`.
 - Each run command is followed by a line linking to
@@ -122,11 +124,19 @@ modules, relative imports and modules no single installed project provides are l
 out. Projects the code needs but never imports, such as an optional backend, go in
 `dependencies`.
 
-Unless `requires_python` is set, the block's `requires-python` is `<3.N`, one minor
-version above the newest Python every listed dependency names in its `Programming
-Language :: Python :: 3.X` classifiers, as installed in the environment building the
-docs. Dependencies without such classifiers don't count; with none left, the line is
-left out.
+The project named by Sphinx's own `project` setting (e.g. `project = 'PyVista'`) gets
+extra treatment when an example imports it and it is installed: its dependency becomes
+`<name>>=X.Y`, the installed release's major and minor version, or plain `<name>` for a
+pre-release or dev build.
+
+Unless `requires_python` is set, the block's `requires-python` combines:
+
+- that project's own `Requires-Python`, e.g. `>=3.10`, when it is listed;
+- `<3.N`, one minor version above the newest Python every listed dependency names in its
+  `Programming Language :: Python :: 3.X` classifiers, as installed in the environment
+  building the docs. Dependencies without such classifiers don't count.
+
+With neither, the line is left out.
 
 ## Conversion rules
 

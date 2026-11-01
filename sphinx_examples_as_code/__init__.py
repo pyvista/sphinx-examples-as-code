@@ -1040,11 +1040,38 @@ def _imported_distributions(source: str) -> list[str]:
     return [dist for dist in dists if dist is not None]
 
 
-def _script_dependencies(source: str, extra: list[str]) -> list[str]:
-    """Return ``source``'s imported distributions plus ``extra``, which wins on a name clash."""
+def _script_dependencies(
+    source: str, extra: list[str], pins: dict[str, str] | None = None
+) -> list[str]:
+    """Return ``source``'s imported distributions, pinned per ``pins``, then ``extra`` on top."""
     deps = {_canonical_name(dist): dist for dist in _imported_distributions(source)}
+    deps.update((name, pin) for name, pin in (pins or {}).items() if name in deps)
     deps.update((_canonical_name(req), req) for req in extra)
     return [deps[key] for key in sorted(deps)]
+
+
+@dataclass(frozen=True)
+class _DocumentedProject:
+    """The installed distribution named by Sphinx's ``project``."""
+
+    name: str  # normalized, as _canonical_name returns it
+    pin: str | None  # e.g. 'pyvista>=0.49'; None for a pre-release or dev build
+    requires_python: str | None
+
+
+@functools.cache
+def _documented_project(project: str | None) -> _DocumentedProject | None:
+    """Look up the installed distribution named like Sphinx's ``project``, if there is one."""
+    if not project:
+        return None
+    name = re.sub(r'[-_.\s]+', '-', project.strip()).lower()
+    try:
+        dist = importlib.metadata.distribution(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    release = re.fullmatch(r'(\d+)\.(\d+)(\.\d+)*', dist.version)
+    pin = f'{dist.name}>={release[1]}.{release[2]}' if release else None
+    return _DocumentedProject(name, pin, dist.metadata['Requires-Python'])
 
 
 _UV_INSTALL_LINE = 'Install uv first: https://docs.astral.sh/uv/getting-started/installation/'
@@ -1052,18 +1079,22 @@ _UV_INSTALL_LINE = 'Install uv first: https://docs.astral.sh/uv/getting-started/
 _PYTHON_CLASSIFIER = re.compile(r'Programming Language :: Python :: 3\.(\d+)$')
 
 
+@functools.cache
+def _newest_python_minor(name: str) -> int | None:
+    """Return the newest ``3.N`` minor an installed distribution's classifiers name, if any."""
+    try:
+        classifiers = importlib.metadata.metadata(name).get_all('Classifier')
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    minors = [int(m[1]) for c in classifiers or [] if (m := _PYTHON_CLASSIFIER.match(c))]
+    return max(minors, default=None)
+
+
 def _python_upper_bound(deps: list[str]) -> str | None:
     """Return ``<3.N`` just above the newest Python every classified dependency supports."""
-    newest = []
-    for dep in deps:
-        try:
-            classifiers = importlib.metadata.metadata(_canonical_name(dep)).get_all('Classifier')
-        except importlib.metadata.PackageNotFoundError:
-            continue
-        minors = [int(m[1]) for c in classifiers or [] if (m := _PYTHON_CLASSIFIER.match(c))]
-        if minors:
-            newest.append(max(minors))
-    return f'<3.{min(newest) + 1}' if newest else None
+    newest = [_newest_python_minor(_canonical_name(dep)) for dep in deps]
+    known = [minor for minor in newest if minor is not None]
+    return f'<3.{min(known) + 1}' if known else None
 
 
 def _script_metadata_header(deps: list[str], requires_python: str | None, run_line: str) -> str:
@@ -1081,11 +1112,28 @@ def _script_metadata_header(deps: list[str], requires_python: str | None, run_li
     return '\n'.join(lines) + '\n'
 
 
+_BARE_SHELL_ARG = re.compile(r'[\w.\-/:@+=]+')
+#: Characters some shell still expands inside double quotes.
+_DOUBLE_QUOTE_UNSAFE = frozenset('"$`\\!%^')
+
+
+def _quote_shell_arg(arg: str) -> str:
+    """Quote a command argument for bash, zsh, PowerShell and cmd alike, where possible."""
+    if _BARE_SHELL_ARG.fullmatch(arg):
+        return arg
+    if _DOUBLE_QUOTE_UNSAFE.isdisjoint(arg):
+        return f'"{arg}"'
+    return shlex.quote(arg)
+
+
 def _jupyter_run_line(deps: list[str], requires_python: str | None, filename: str) -> str:
     """Build the one-line command that opens a generated notebook with its dependencies."""
-    python_arg = f' --python {shlex.quote(requires_python)}' if requires_python else ''
-    with_args = ''.join(f' --with {shlex.quote(dep)}' for dep in deps)
-    command = f'uvx{python_arg} --from jupyterlab{with_args} jupyter-lab {filename}'
+    python_arg = f' --python {_quote_shell_arg(requires_python)}' if requires_python else ''
+    # PEP 508 markers accept either quote style, so double quotes become single.
+    dep_args = (_quote_shell_arg(dep.replace('"', "'")) for dep in deps)
+    with_args = ''.join(f' --with {arg}' for arg in dep_args)
+    notebook = _quote_shell_arg(filename)
+    command = f'uvx{python_arg} --from jupyterlab{with_args} jupyter-lab {notebook}'
     return f'Open this notebook with: `{command}`'
 
 
@@ -1170,11 +1218,14 @@ def _build_download_entries(
         return []
 
     deps: dict[str, list[str]] = {}
+    project = None
     if script_metadata is not None:
         implied = {_FMT_MARIMO: ['marimo']}
         extra = script_metadata['dependencies']
+        project = _documented_project(script_metadata['project'])
+        pins = {project.name: project.pin} if project and project.pin else {}
         deps = {
-            fmt: _script_dependencies(source, [*implied.get(fmt, []), *extra.get(fmt, [])])
+            fmt: _script_dependencies(source, [*implied.get(fmt, []), *extra.get(fmt, [])], pins)
             for fmt in formats
         }
 
@@ -1191,7 +1242,11 @@ def _build_download_entries(
         return _build_notebook(cells)
 
     def requires_python_for(fmt: str) -> str | None:
-        return script_metadata['requires_python'] or _python_upper_bound(deps[fmt])
+        if script_metadata['requires_python']:
+            return script_metadata['requires_python']
+        listed = {_canonical_name(dep) for dep in deps[fmt]}
+        floor = project.requires_python if project and project.name in listed else None
+        return ','.join(filter(None, (floor, _python_upper_bound(deps[fmt])))) or None
 
     def header_for(fmt: str, run_line: str) -> str:
         if not deps:
@@ -1401,7 +1456,15 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
     formats = conf['formats']
     footer = conf['footer']
     link_labels = conf['link_labels']
-    script_metadata = conf if conf['script_metadata'] else None
+    script_metadata = (
+        {
+            'dependencies': conf['dependencies'],
+            'requires_python': conf['requires_python'],
+            'project': app.config.project,
+        }
+        if conf['script_metadata']
+        else None
+    )
 
     if conf['gallery_downloads']:
         _process_gallery_page(
@@ -1458,7 +1521,7 @@ def _coerce_conf_value(key: str, value: object) -> object:
     command line always arrives as a plain string -- Sphinx's own type
     coercion for ``-D`` overrides (bool ``0``/``1``, comma-split lists, ...)
     only applies to a config value's top level, never to a dict's individual
-    keys, so it's redone here for the two keys that need it.
+    keys, so it's redone here for the keys that need it.
     """
     if not isinstance(value, str):
         return value
@@ -1529,9 +1592,22 @@ def _validate_dependencies(dependencies: object) -> None:
         msg = f'{key} has unknown format(s) {unknown} (valid: {", ".join(_FORMAT_ORDER)}).'
         raise ConfigError(msg + _renamed_hint(unknown))
     for fmt, reqs in dependencies.items():
-        if not isinstance(reqs, list) or not all(isinstance(req, str) for req in reqs):
-            msg = f'{key}[{fmt!r}] must be a list of strings, got {reqs!r}.'
+        if not isinstance(reqs, list) or not all(
+            isinstance(req, str) and req.strip() for req in reqs
+        ):
+            msg = f'{key}[{fmt!r}] must be a list of non-empty strings, got {reqs!r}.'
             raise ConfigError(msg)
+
+
+def _validate_requires_python(requires_python: object) -> None:
+    """Raise a ``ConfigError`` unless ``requires_python`` is ``None`` or a non-empty string."""
+    if requires_python is None or (isinstance(requires_python, str) and requires_python.strip()):
+        return
+    msg = (
+        "sphinx_examples_as_code_conf['requires_python'] must be a specifier string such as "
+        f"'>=3.10', or None, got {requires_python!r}."
+    )
+    raise ConfigError(msg)
 
 
 def _marimo_converter_available() -> bool:
@@ -1561,6 +1637,7 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged.update((key, _coerce_conf_value(key, value)) for key, value in user_conf.items())
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
     _validate_dependencies(merged['dependencies'])
+    _validate_requires_python(merged['requires_python'])
     _validate_formats(merged['formats'])
     if _FMT_MARIMO in merged['formats'] and not _marimo_converter_available():
         if 'formats' in user_conf:
