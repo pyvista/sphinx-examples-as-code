@@ -1141,6 +1141,24 @@ def test_qualified_name_for_desc_ancestor():
     assert seac._qualified_name_for(heading, 'page', 1) == 'pkg.mod.func'
 
 
+@pytest.mark.parametrize(('desc_id', 'expected'), [('pkg.mod.func', 'mod.func'), ('func', 'func')])
+def test_download_stem_drops_top_level_package(desc_id: str, expected: str):
+    desc = addnodes.desc()
+    desc += addnodes.desc_signature(ids=[desc_id])
+    content = addnodes.desc_content()
+    heading = nodes.rubric()
+    content += heading
+    desc += content
+    assert seac._download_stem(heading, 'page', 1) == expected
+
+
+def test_download_stem_keeps_dotted_fallback_name():
+    section = nodes.section()
+    heading = nodes.rubric()
+    section += heading
+    assert seac._download_stem(heading, 'release.0.44', 1) == 'release.0.44-example-1'
+
+
 def test_qualified_name_for_fallback_no_desc_ancestor():
     section = nodes.section()
     heading = nodes.rubric()
@@ -1486,10 +1504,10 @@ def test_footer_segment_default_footer_jupyter_links_clickable():
 
 def test_write_python_script_writes_file_with_32_char_digest(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
-    rel_path = seac._write_python_script(app, 'pkg.Class.func', 'x = 1\n')
+    rel_path = seac._write_python_script(app, 'pkg.func', 'x = 1\n')
     digest, filename = rel_path.split('/')
     assert len(digest) == 32
-    assert filename == 'Class_func.py'
+    assert filename == 'pkg_func.py'
     assert (tmp_path / '_downloads' / digest / filename).read_text() == 'x = 1\n'
 
 
@@ -1617,13 +1635,12 @@ def test_build_notebook_valid_nbformat():
 @pytest.mark.parametrize(
     ('name', 'fmt', 'expected'),
     [
-        ('pyvista.ImageDataFilters.resample', 'marimo', 'ImageDataFilters_resample_marimo.py'),
-        ('pyvista.read', 'python', 'read.py'),
-        ('index-example-1', 'jupyter', 'index-example-1.ipynb'),
-        ('', 'python', 'example.py'),
+        ('ImageDataFilters.resample', 'marimo', 'ImageDataFilters_resample_marimo.py'),
+        ('plot_vtk9.4', 'python', 'plot_vtk9_4.py'),
+        ('', 'jupyter', 'example.ipynb'),
     ],
 )
-def test_download_filename_drops_top_level_package(name: str, fmt: str, expected: str):
+def test_download_filename(name: str, fmt: str, expected: str):
     assert seac._download_filename(name, fmt) == expected
 
 
@@ -1635,10 +1652,10 @@ def test_download_filename_drops_top_level_package(name: str, fmt: str, expected
 def test_write_jupyter_notebook_writes_valid_json(tmp_path: Path):
     app = Mock(outdir=str(tmp_path))
     notebook = seac._build_notebook([('code', ['x = 1'])])
-    rel_path = seac._write_jupyter_notebook(app, 'pkg.Class.func', notebook)
+    rel_path = seac._write_jupyter_notebook(app, 'pkg.func', notebook)
     digest, filename = rel_path.split('/')
     assert len(digest) == 32
-    assert filename == 'Class_func.ipynb'
+    assert filename == 'pkg_func.ipynb'
     written = (tmp_path / '_downloads' / digest / filename).read_text()
     assert json.loads(written) == notebook
 

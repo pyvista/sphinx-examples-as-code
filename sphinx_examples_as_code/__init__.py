@@ -809,6 +809,14 @@ def _qualified_name_for(node: nodes.Node, docname: str, counter: int) -> str:
     return f'{base}-example-{counter}'
 
 
+def _download_stem(node: nodes.Node, docname: str, counter: int) -> str:
+    """Name a span's downloads, e.g. ``Plotter.show`` for ``pyvista.Plotter.show``."""
+    name = _qualified_name_for(node, docname, counter)
+    if any(_desc_id(desc) is not None for desc in _enclosing_descs(node)):
+        return name.partition('.')[2] or name
+    return name
+
+
 def _header_title(qualified_name: str) -> str:
     """Build the file's own header title text, e.g. ``Examples from pyvista.read``."""
     return f'Examples from {qualified_name}'
@@ -937,8 +945,7 @@ def _build_notebook(cells: list[tuple[str, list[str]]]) -> dict:
 
 def _download_filename(name: str, fmt: str) -> str:
     """Return the file name a download is written under, e.g. ``Plotter_show.py``."""
-    # Drop the top-level package, e.g. pyvista.Plotter.show -> Plotter.show.
-    safe_name = name.partition('.')[2].replace('.', '_') if '.' in name else name or 'example'
+    safe_name = name.replace('.', '_') if name else 'example'
     return f'{safe_name}{_SUFFIXES[fmt]}'
 
 
@@ -1010,9 +1017,8 @@ def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict, header: str =
         else cell
         for cell in notebook['cells']
     ]
-    converted = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells}))
-    ir = converted.ir
-    source = type(converted)(replace(ir, cells=_title_first(ir.cells))).to_py()
+    ir = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells})).to_ir()
+    source = MarimoConvert.from_ir(replace(ir, cells=_title_first(ir.cells))).to_py()
     return _write_download_file(app, name, _FMT_MARIMO, header + source)
 
 
@@ -1372,12 +1378,12 @@ def _build_download_entries(
         cap = _python_upper_bound(deps[fmt], project.name if project else None)
         return _python_range(floor, cap)
 
-    listed = {fmt: _drop_covered(fmt_deps) for fmt, fmt_deps in deps.items()}
+    shown = {fmt: _drop_covered(fmt_deps) for fmt, fmt_deps in deps.items()}
 
     def header_for(fmt: str, run_line: str) -> str:
         if not deps:
             return ''
-        return _script_metadata_header(listed[fmt], requires_python_for(fmt), run_line)
+        return _script_metadata_header(shown[fmt], requires_python_for(fmt), run_line)
 
     entries = []
     for fmt in _FORMAT_ORDER:
@@ -1390,7 +1396,7 @@ def _build_download_entries(
             rel_path = _write_python_script(app, name, header + source)
         elif fmt == _FMT_JUPYTER:
             run_line = (
-                _jupyter_run_line(listed[fmt], requires_python_for(fmt), filename) if deps else None
+                _jupyter_run_line(shown[fmt], requires_python_for(fmt), filename) if deps else None
             )
             rel_path = _write_jupyter_notebook(app, name, notebook_for(run_line))
         else:
@@ -1424,7 +1430,7 @@ def _process_span(
     entries = _build_download_entries(
         app,
         docname,
-        name,
+        _download_stem(heading, docname, counter),
         _header_title(name),
         nodes_in_span,
         formats,

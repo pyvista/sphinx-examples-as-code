@@ -142,8 +142,8 @@ Unless `requires_python` is set, the block's `requires-python` combines:
 
 - that project's own `Requires-Python`, e.g. `>=3.10`, when it is listed;
 - `<3.N`, one minor version above the newest Python named in the `Programming Language ::
-  Python :: 3.X` classifiers of that project and of every listed dependency installed
-  from a platform-specific wheel, as installed in the environment building the docs.
+  Python :: 3.X` classifiers of that project and of every dependency, listed or left out,
+  installed from a platform-specific wheel, as installed in the environment building the docs.
   Pure-Python dependencies and dependencies without such classifiers don't count, and
   the bound is dropped when it would exclude every Python the project's own
   `Requires-Python` allows.
