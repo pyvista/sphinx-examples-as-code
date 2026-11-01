@@ -86,12 +86,14 @@ sphinx_examples_as_code_conf = {
 - `script_metadata`: `True` adds each download's dependencies and a one-line run
   command. See [Dependencies and run commands](#dependencies-and-run-commands) below.
   `False` (default) adds neither.
-- `dependencies`: extra requirements per format, added to the detected ones, e.g.
+- `dependencies`: extra PEP 508 requirements per format, added to the detected ones, e.g.
   `{'jupyter': ['pyvista[jupyter]']}`. An entry naming a detected project replaces it,
-  so `{'python': ['pyvista>=0.46']}` pins a version.
+  so `{'python': ['pyvista>=0.46']}` sets its version. An entry without a version keeps
+  the automatic pin described below. Only used with `script_metadata` on.
 - `requires_python`: a `requires-python` specifier for the dependency block, e.g.
-  `'>=3.10'`. `None` (default) derives an upper bound instead; see
-  [Dependencies and run commands](#dependencies-and-run-commands).
+  `'>=3.10'`. `None` (default) derives one from the dependencies instead; see
+  [Dependencies and run commands](#dependencies-and-run-commands). Only used with
+  `script_metadata` on.
 
 An unrecognized key raises a configuration error at build start.
 
@@ -112,7 +114,9 @@ imports, plus any `dependencies` set for its format, and says how to run it:
   block, followed by `# Run this script with: uv run <name>.py`.
 - Jupyter notebooks say `` Open this notebook with: `uvx --python "<requires-python>" --from jupyterlab --with <dependency> ... jupyter-lab <name>.ipynb` `` in their first cell,
   with `--python` only when there is a `requires-python`. Arguments are double-quoted where
-  needed, so the command works in bash, zsh, PowerShell and cmd.
+  needed, so the command works in bash, zsh, PowerShell and cmd. An argument containing
+  `"`, `$`, a backtick, `\`, `%` or a `!` not followed by `=` is single-quoted instead,
+  which cmd does not understand.
 - marimo notebooks start with the same `# /// script` block, which also lists `marimo`,
   followed by `# Open this notebook with: uvx marimo edit --sandbox <name>.marimo.py`.
 - Each run command is followed by a line linking to
@@ -132,9 +136,12 @@ pre-release or dev build.
 Unless `requires_python` is set, the block's `requires-python` combines:
 
 - that project's own `Requires-Python`, e.g. `>=3.10`, when it is listed;
-- `<3.N`, one minor version above the newest Python every listed dependency names in its
-  `Programming Language :: Python :: 3.X` classifiers, as installed in the environment
-  building the docs. Dependencies without such classifiers don't count.
+- `<3.N`, one minor version above the newest Python named in the `Programming Language ::
+  Python :: 3.X` classifiers of that project and of every listed dependency installed
+  from a platform-specific wheel, as installed in the environment building the docs.
+  Pure-Python dependencies and dependencies without such classifiers don't count, and
+  the bound is dropped when it would exclude every Python the project's own
+  `Requires-Python` allows.
 
 With neither, the line is left out.
 

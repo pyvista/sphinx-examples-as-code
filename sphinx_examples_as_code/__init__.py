@@ -22,6 +22,12 @@ from urllib.parse import urlsplit
 
 from docutils import nodes
 from docutils.core import publish_doctree
+from packaging.requirements import Requirement
+from packaging.specifiers import InvalidSpecifier
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion
+from packaging.version import Version
 from sphinx import addnodes
 from sphinx.errors import ConfigError
 from sphinx.util import logging
@@ -1000,8 +1006,7 @@ def _module_distributions() -> dict[str, list[str]]:
 
 def _canonical_name(requirement: str) -> str:
     """Return a requirement's normalized name, e.g. ``pyvista`` for ``PyVista[all]>=0.4``."""
-    name = re.match(r'[A-Za-z0-9._-]*', requirement.strip()).group()
-    return re.sub(r'[-_.]+', '-', name).lower()
+    return canonicalize_name(Requirement(requirement).name)
 
 
 def _distribution_for(module: str) -> str | None:
@@ -1010,7 +1015,7 @@ def _distribution_for(module: str) -> str | None:
     if len(dists) == 1:
         return dists[0]
     if not dists:
-        # Editable installs can hide their modules from packages_distributions().
+        # Fall back to a distribution named like the module.
         try:
             return importlib.metadata.distribution(module).name
         except importlib.metadata.PackageNotFoundError:
@@ -1044,10 +1049,22 @@ def _script_dependencies(
     source: str, extra: list[str], pins: dict[str, str] | None = None
 ) -> list[str]:
     """Return ``source``'s imported distributions, pinned per ``pins``, then ``extra`` on top."""
+    pins = pins or {}
     deps = {_canonical_name(dist): dist for dist in _imported_distributions(source)}
-    deps.update((name, pin) for name, pin in (pins or {}).items() if name in deps)
-    deps.update((_canonical_name(req), req) for req in extra)
+    deps.update((name, pin) for name, pin in pins.items() if name in deps)
+    for req in extra:
+        name = _canonical_name(req)
+        deps[name] = _keep_pin(req, pins.get(name))
     return [deps[key] for key in sorted(deps)]
+
+
+def _keep_pin(requirement: str, pin: str | None) -> str:
+    """Give ``requirement`` the version specifier of ``pin`` when it has none of its own."""
+    parsed = Requirement(requirement)
+    if pin is None or parsed.specifier or parsed.url:
+        return requirement
+    parsed.specifier = Requirement(pin).specifier
+    return str(parsed)
 
 
 @dataclass(frozen=True)
@@ -1055,7 +1072,7 @@ class _DocumentedProject:
     """The installed distribution named by Sphinx's ``project``."""
 
     name: str  # normalized, as _canonical_name returns it
-    pin: str | None  # e.g. 'pyvista>=0.49'; None for a pre-release or dev build
+    pin: str | None  # e.g. 'pyvista>=0.49'; None for a pre-release, dev or unparsable version
     requires_python: str | None
 
 
@@ -1064,13 +1081,18 @@ def _documented_project(project: str | None) -> _DocumentedProject | None:
     """Look up the installed distribution named like Sphinx's ``project``, if there is one."""
     if not project:
         return None
-    name = re.sub(r'[-_.\s]+', '-', project.strip()).lower()
+    name = canonicalize_name(re.sub(r'\s+', '-', project.strip()))
     try:
         dist = importlib.metadata.distribution(name)
     except importlib.metadata.PackageNotFoundError:
         return None
-    release = re.fullmatch(r'(\d+)\.(\d+)(\.\d+)*', dist.version)
-    pin = f'{dist.name}>={release[1]}.{release[2]}' if release else None
+    try:
+        version = Version(dist.version)
+    except InvalidVersion:
+        version = None
+    pin = None
+    if version is not None and not version.is_prerelease:
+        pin = f'{dist.name}>={version.major}.{version.minor}'
     return _DocumentedProject(name, pin, dist.metadata['Requires-Python'])
 
 
@@ -1090,11 +1112,34 @@ def _newest_python_minor(name: str) -> int | None:
     return max(minors, default=None)
 
 
-def _python_upper_bound(deps: list[str]) -> str | None:
-    """Return ``<3.N`` just above the newest Python every classified dependency supports."""
-    newest = [_newest_python_minor(_canonical_name(dep)) for dep in deps]
+@functools.cache
+def _ships_compiled_wheel(name: str) -> bool:
+    """Check whether an installed distribution's wheel is tagged for a platform or ABI."""
+    try:
+        wheel = importlib.metadata.distribution(name).read_text('WHEEL') or ''
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    tags = [
+        line.partition(':')[2].strip() for line in wheel.splitlines() if line.startswith('Tag:')
+    ]
+    return any(not tag.endswith('-none-any') for tag in tags)
+
+
+def _python_upper_bound(deps: list[str], project: str | None = None) -> str | None:
+    """Return ``<3.N`` just above the newest Python ``project`` and every compiled dep name."""
+    names = [_canonical_name(dep) for dep in deps]
+    newest = [_newest_python_minor(n) for n in names if n == project or _ships_compiled_wheel(n)]
     known = [minor for minor in newest if minor is not None]
     return f'<3.{min(known) + 1}' if known else None
+
+
+def _python_range(floor: str | None, cap: str | None) -> str | None:
+    """Join ``floor`` and ``cap``, dropping ``cap`` when no ``3.N`` Python would be left."""
+    if floor and cap:
+        allowed = SpecifierSet(f'{floor},{cap}')
+        if not any(f'3.{minor}' in allowed for minor in range(100)):
+            cap = None
+    return ','.join(filter(None, (floor, cap))) or None
 
 
 def _script_metadata_header(deps: list[str], requires_python: str | None, run_line: str) -> str:
@@ -1112,16 +1157,16 @@ def _script_metadata_header(deps: list[str], requires_python: str | None, run_li
     return '\n'.join(lines) + '\n'
 
 
-_BARE_SHELL_ARG = re.compile(r'[\w.\-/:@+=]+')
-#: Characters some shell still expands inside double quotes.
-_DOUBLE_QUOTE_UNSAFE = frozenset('"$`\\!%^')
+_BARE_SHELL_ARG = re.compile(r'[\w./-][\w./:@+=-]*')
+#: Characters some shell still expands inside double quotes; ``!=`` is safe everywhere.
+_DOUBLE_QUOTE_UNSAFE = re.compile(r'["$`\\%]|!(?!=)')
 
 
 def _quote_shell_arg(arg: str) -> str:
     """Quote a command argument for bash, zsh, PowerShell and cmd alike, where possible."""
     if _BARE_SHELL_ARG.fullmatch(arg):
         return arg
-    if _DOUBLE_QUOTE_UNSAFE.isdisjoint(arg):
+    if not _DOUBLE_QUOTE_UNSAFE.search(arg):
         return f'"{arg}"'
     return shlex.quote(arg)
 
@@ -1129,7 +1174,7 @@ def _quote_shell_arg(arg: str) -> str:
 def _jupyter_run_line(deps: list[str], requires_python: str | None, filename: str) -> str:
     """Build the one-line command that opens a generated notebook with its dependencies."""
     python_arg = f' --python {_quote_shell_arg(requires_python)}' if requires_python else ''
-    # PEP 508 markers accept either quote style, so double quotes become single.
+    # Swap marker double quotes for single quotes.
     dep_args = (_quote_shell_arg(dep.replace('"', "'")) for dep in deps)
     with_args = ''.join(f' --with {arg}' for arg in dep_args)
     notebook = _quote_shell_arg(filename)
@@ -1246,7 +1291,8 @@ def _build_download_entries(
             return script_metadata['requires_python']
         listed = {_canonical_name(dep) for dep in deps[fmt]}
         floor = project.requires_python if project and project.name in listed else None
-        return ','.join(filter(None, (floor, _python_upper_bound(deps[fmt])))) or None
+        cap = _python_upper_bound(deps[fmt], project.name if project else None)
+        return _python_range(floor, cap)
 
     def header_for(fmt: str, run_line: str) -> str:
         if not deps:
@@ -1592,17 +1638,31 @@ def _validate_dependencies(dependencies: object) -> None:
         msg = f'{key} has unknown format(s) {unknown} (valid: {", ".join(_FORMAT_ORDER)}).'
         raise ConfigError(msg + _renamed_hint(unknown))
     for fmt, reqs in dependencies.items():
-        if not isinstance(reqs, list) or not all(
-            isinstance(req, str) and req.strip() for req in reqs
-        ):
-            msg = f'{key}[{fmt!r}] must be a list of non-empty strings, got {reqs!r}.'
+        if not isinstance(reqs, list) or not all(_is_requirement(req) for req in reqs):
+            msg = f'{key}[{fmt!r}] must be a list of requirement strings, got {reqs!r}.'
             raise ConfigError(msg)
+
+
+def _is_requirement(value: object) -> bool:
+    """Check whether ``value`` is a valid PEP 508 requirement string."""
+    try:
+        Requirement(value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _validate_requires_python(requires_python: object) -> None:
     """Raise a ``ConfigError`` unless ``requires_python`` is ``None`` or a non-empty string."""
-    if requires_python is None or (isinstance(requires_python, str) and requires_python.strip()):
+    if requires_python is None:
         return
+    if isinstance(requires_python, str) and requires_python.strip():
+        try:
+            SpecifierSet(requires_python)
+        except InvalidSpecifier:
+            pass
+        else:
+            return
     msg = (
         "sphinx_examples_as_code_conf['requires_python'] must be a specifier string such as "
         f"'>=3.10', or None, got {requires_python!r}."

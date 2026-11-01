@@ -2846,15 +2846,18 @@ def test_script_metadata_header():
 
 @pytest.fixture
 def fake_classifiers(monkeypatch: pytest.MonkeyPatch):
-    """Serve installed-distribution classifiers from a dict, with the lookup cache cleared."""
+    """Serve classifiers from a dict, every listed distribution compiled unless ``pure``."""
 
-    def install(classifiers: dict[str, list[str] | None]) -> None:
+    def install(classifiers: dict[str, list[str] | None], pure: tuple[str, ...] = ()) -> None:
         def metadata(name: str) -> Mock:
             if name not in classifiers:
                 raise seac.importlib.metadata.PackageNotFoundError(name)
             return Mock(get_all=lambda _key: classifiers[name])
 
         monkeypatch.setattr(seac.importlib.metadata, 'metadata', metadata)
+        monkeypatch.setattr(
+            seac, '_ships_compiled_wheel', lambda name: name in classifiers and name not in pure
+        )
 
     seac._newest_python_minor.cache_clear()
     yield install
@@ -2878,6 +2881,47 @@ def test_python_upper_bound_takes_lowest_newest_version(fake_classifiers):
 def test_python_upper_bound_none_without_classifiers(fake_classifiers):
     fake_classifiers({'vtk': []})
     assert seac._python_upper_bound(['vtk', 'missing']) is None
+
+
+def test_python_upper_bound_skips_pure_dependencies_except_project(fake_classifiers):
+    fake_classifiers(
+        {
+            'pyvista': ['Programming Language :: Python :: 3.14'],
+            'cycler': ['Programming Language :: Python :: 3.12'],
+            'numpy': ['Programming Language :: Python :: 3.15'],
+        },
+        pure=('pyvista', 'cycler'),
+    )
+    deps = ['cycler', 'numpy', 'pyvista']
+    assert seac._python_upper_bound(deps) == '<3.16'
+    assert seac._python_upper_bound(deps, project='pyvista') == '<3.15'
+
+
+def test_ships_compiled_wheel():
+    seac._ships_compiled_wheel.cache_clear()
+    assert seac._ships_compiled_wheel('numpy')
+    assert not seac._ships_compiled_wheel('docutils')
+    assert not seac._ships_compiled_wheel('not-an-installed-project')
+
+
+@pytest.mark.parametrize(
+    ('floor', 'cap', 'expected'),
+    [
+        ('>=3.10', '<3.15', '>=3.10,<3.15'),
+        ('>=3.10', '<3.10', '>=3.10'),
+        ('>=3.13', '<3.13', '>=3.13'),
+        (None, '<3.15', '<3.15'),
+        ('>=3.10', None, '>=3.10'),
+        (None, None, None),
+    ],
+)
+def test_python_range(floor: str | None, cap: str | None, expected: str | None):
+    assert seac._python_range(floor, cap) == expected
+
+
+def test_newest_python_minor_missing_distribution(fake_classifiers):
+    fake_classifiers({})
+    assert seac._newest_python_minor('missing') is None
 
 
 def test_newest_python_minor_is_cached(fake_classifiers):
@@ -2936,6 +2980,10 @@ def test_jupyter_run_line_marker_double_quotes_become_single():
         ('numpy', 'numpy'),
         ('numpy>=2', '"numpy>=2"'),
         ('pyvista[jupyter]', '"pyvista[jupyter]"'),
+        ('==3.12', '"==3.12"'),
+        ('numpy!=2.0.0', '"numpy!=2.0.0"'),
+        ('a^b', '"a^b"'),
+        ('a!b', "'a!b'"),
         ('pkg @ https://x.org/a%20b.whl', "'pkg @ https://x.org/a%20b.whl'"),
     ],
 )
@@ -3031,9 +3079,10 @@ def test_coerce_conf_value_script_metadata_bool_strings(raw: str, expected: bool
         (['numpy'], 'must be a dict'),
         ({'pdf': ['numpy']}, r"unknown format\(s\) \['pdf'\]"),
         ({'ipynb': ['numpy']}, "'ipynb' is now 'jupyter'"),
-        ({'python': 'numpy'}, r"\['python'\] must be a list of non-empty strings"),
-        ({'python': [1]}, r"\['python'\] must be a list of non-empty strings"),
-        ({'python': [' ']}, r"\['python'\] must be a list of non-empty strings"),
+        ({'python': 'numpy'}, r"\['python'\] must be a list of requirement strings"),
+        ({'python': [1]}, r"\['python'\] must be a list of requirement strings"),
+        ({'python': [' ']}, r"\['python'\] must be a list of requirement strings"),
+        ({'python': ['git+https://x.org/a']}, r"\['python'\] must be a list of requirement"),
     ],
 )
 def test_finalize_conf_invalid_dependencies_raises(dependencies: object, match: str):
@@ -3042,7 +3091,14 @@ def test_finalize_conf_invalid_dependencies_raises(dependencies: object, match: 
         seac._finalize_conf(Mock(), config)
 
 
-@pytest.mark.parametrize('requires_python', [3.10, '', ['>=3.10']])
+def test_finalize_conf_accepts_dependencies():
+    dependencies = {'jupyter': ['pyvista[jupyter]', 'numpy; python_version<"3.12"']}
+    config = Mock(sphinx_examples_as_code_conf={'dependencies': dependencies})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['dependencies'] == dependencies
+
+
+@pytest.mark.parametrize('requires_python', [3.10, '', ['>=3.10'], '3.10'])
 def test_finalize_conf_invalid_requires_python_raises(requires_python: object):
     config = Mock(sphinx_examples_as_code_conf={'requires_python': requires_python})
     with pytest.raises(ConfigError, match=r"\['requires_python'\] must be a specifier string"):
@@ -3079,14 +3135,32 @@ def test_documented_project_installed(clear_documented_project):
     assert seac._documented_project('NumPy') == _installed_numpy()
 
 
-@pytest.mark.parametrize('version', ['0.50.dev0', '1.0rc1', '2'])
-def test_documented_project_unpinned_version(
-    version: str, monkeypatch: pytest.MonkeyPatch, clear_documented_project
+@pytest.mark.parametrize(
+    ('version', 'pin'),
+    [
+        ('0.50.dev0', None),
+        ('0.49.3.dev12+g1234abc', None),
+        ('1.0rc1', None),
+        ('not a version', None),
+        ('0.49.2', 'pyvista>=0.49'),
+        ('1.2.post1', 'pyvista>=1.2'),
+        ('0.49.0+cu121', 'pyvista>=0.49'),
+        ('2', 'pyvista>=2.0'),
+    ],
+)
+def test_documented_project_pin(
+    version: str, pin: str | None, monkeypatch: pytest.MonkeyPatch, clear_documented_project
 ):
     dist = Mock(version=version, metadata={'Requires-Python': '>=3.10'})
     dist.name = 'pyvista'
     monkeypatch.setattr(seac.importlib.metadata, 'distribution', lambda _name: dist)
-    assert seac._documented_project('PyVista') == seac._DocumentedProject('pyvista', None, '>=3.10')
+    assert seac._documented_project('PyVista') == seac._DocumentedProject('pyvista', pin, '>=3.10')
+
+
+def test_script_dependencies_extra_without_version_keeps_pin():
+    pins = {'pyvista': 'pyvista>=0.49'}
+    deps = seac._script_dependencies('import pyvista\n', ['pyvista[jupyter]'], pins)
+    assert deps == ['pyvista[jupyter]>=0.49']
 
 
 def test_script_dependencies_pins_only_imported_projects():
