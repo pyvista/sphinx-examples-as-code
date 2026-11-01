@@ -275,7 +275,7 @@ def test_gallery_downloads_generated_python_executes(gallery_build: tuple[Path, 
 def test_gallery_downloads_marimo_notebook_executes(gallery_build: tuple[Path, str]):
     """The marimo notebook holds the page's code and runs as a plain script."""
     html_dir, _html = gallery_build
-    (marimo_path,) = (html_dir / '_downloads').rglob('*.marimo.py')
+    (marimo_path,) = (html_dir / '_downloads').rglob('*_marimo.py')
     src = marimo_path.read_text(encoding='utf-8')
     assert 'app = marimo.App(' in src
     assert 'A minimal gallery example' in src

@@ -92,7 +92,7 @@ def built(tmp_path_factory) -> tuple[Path, list[Path]]:
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    examples = sorted(p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py'))
+    examples = sorted(p for p in downloads_dir.rglob('*.py') if not p.name.endswith('_marimo.py'))
     return html_dir, examples
 
 
@@ -494,7 +494,7 @@ def test_formats_config_selection(
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    marimo_files = list(downloads_dir.rglob('*.marimo.py'))
+    marimo_files = list(downloads_dir.rglob('*_marimo.py'))
     python_files = [p for p in downloads_dir.rglob('*.py') if p not in marimo_files]
     jupyter_files = list(downloads_dir.rglob('*.ipynb'))
 
@@ -553,7 +553,7 @@ def test_base_url_set_resolves_links(tmp_path: Path):
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    python_files = [p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py')]
+    python_files = [p for p in downloads_dir.rglob('*.py') if not p.name.endswith('_marimo.py')]
     jupyter_files = list(downloads_dir.rglob('*.ipynb'))
 
     # a regular reference: link resolved in .ipynb, omitted in .py

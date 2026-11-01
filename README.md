@@ -64,7 +64,7 @@ sphinx_examples_as_code_conf = {
   (default) or `'bottom'`.
 - `formats`: which downloads to generate. A list containing any of `'python'` (a plain
   Python script, `<name>.py`), `'jupyter'` (a Jupyter notebook, `<name>.ipynb`) and
-  `'marimo'` (a marimo notebook, `<name>.marimo.py`); defaults to all three. Always
+  `'marimo'` (a marimo notebook, `<name>_marimo.py`); defaults to all three. Always
   offered in that order regardless of how the list is written. Without marimo 0.14 or
   newer installed, the default skips the marimo download, and a `formats` that names
   `'marimo'` (in `conf.py` or through `-D`) stops the build with a configuration error. An unknown format raises a configuration error too;
@@ -118,7 +118,7 @@ imports, plus any `dependencies` set for its format, and says how to run it:
   `"`, `$`, a backtick, `\`, `%` or a `!` not followed by `=` is single-quoted instead,
   which cmd does not understand.
 - marimo notebooks start with the same `# /// script` block, which also lists `marimo`,
-  followed by `# Open this notebook with: uvx marimo edit --sandbox <name>.marimo.py`.
+  followed by `# Open this notebook with: uvx marimo edit --sandbox <name>_marimo.py`.
 - Each run command is followed by a line linking to
   [uv's installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
@@ -189,7 +189,7 @@ cells instead.
 
 Generated marimo notebooks are that same Jupyter notebook converted by marimo's own
 converter, the one behind `marimo convert`. `from __future__` imports are dropped first,
-so the notebook also runs as a plain script (`python <name>.marimo.py`).
+so the notebook also runs as a plain script (`python <name>_marimo.py`).
 
 A download link is only added if the resulting code contains at least one real
 executable statement.

@@ -1856,8 +1856,8 @@ def test_process_span_footer_in_notebook_is_linkified(tmp_path: Path):
         (['jupyter'], ['.ipynb']),
         (['python', 'jupyter'], ['.py', '.ipynb']),
         (['jupyter', 'python'], ['.py', '.ipynb']),  # canonical order regardless of config order
-        (['marimo'], ['.marimo.py']),
-        (['marimo', 'python', 'jupyter'], ['.py', '.ipynb', '.marimo.py']),
+        (['marimo'], ['_marimo.py']),
+        (['marimo', 'python', 'jupyter'], ['.py', '.ipynb', '_marimo.py']),
         ([], []),
     ],
 )
