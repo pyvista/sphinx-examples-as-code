@@ -181,6 +181,9 @@ _FMT_PYTHON = 'python'
 _FMT_JUPYTER = 'jupyter'
 _FMT_MARIMO = 'marimo'
 
+#: File name suffix of each download format, e.g. ``pyvista_read_marimo.py``.
+_SUFFIXES = {_FMT_PYTHON: '.py', _FMT_JUPYTER: '.ipynb', _FMT_MARIMO: '_marimo.py'}
+
 
 @dataclass(frozen=True)
 class _RenderContext:
@@ -931,13 +934,13 @@ def _build_notebook(cells: list[tuple[str, list[str]]]) -> dict:
     }
 
 
-def _download_filename(name: str, extension: str) -> str:
+def _download_filename(name: str, fmt: str) -> str:
     """Return the file name a download is written under, e.g. ``pyvista_read.py``."""
     safe_name = name.replace('.', '_') if name else 'example'
-    return f'{safe_name}.{extension}'
+    return f'{safe_name}{_SUFFIXES[fmt]}'
 
 
-def _write_download_file(app: Sphinx, name: str, extension: str, content: str) -> str:
+def _write_download_file(app: Sphinx, name: str, fmt: str, content: str) -> str:
     """Write generated content directly into the builder's downloads dir.
 
     Returns the written file's path relative to the downloads directory --
@@ -948,7 +951,7 @@ def _write_download_file(app: Sphinx, name: str, extension: str, content: str) -
     """
     # 32 hex chars, matching Sphinx's own native _downloads/<digest>/... layout.
     digest = hashlib.sha256(content.encode()).hexdigest()[:32]
-    filename = _download_filename(name, extension)
+    filename = _download_filename(name, fmt)
     rel_path = f'{digest}/{filename}'
 
     out_path = Path(app.outdir) / '_downloads' / digest / filename
@@ -959,12 +962,12 @@ def _write_download_file(app: Sphinx, name: str, extension: str, content: str) -
 
 def _write_python_script(app: Sphinx, name: str, source: str) -> str:
     """Write a generated Python script; see ``_write_download_file``."""
-    return _write_download_file(app, name, 'py', source)
+    return _write_download_file(app, name, _FMT_PYTHON, source)
 
 
 def _write_jupyter_notebook(app: Sphinx, name: str, notebook: dict) -> str:
     """Write a generated Jupyter notebook; see ``_write_download_file``."""
-    return _write_download_file(app, name, 'ipynb', json.dumps(notebook, indent=1))
+    return _write_download_file(app, name, _FMT_JUPYTER, json.dumps(notebook, indent=1))
 
 
 def _drop_future_imports(source: list[str]) -> list[str]:
@@ -995,7 +998,7 @@ def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict, header: str =
         for cell in notebook['cells']
     ]
     source = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells})).to_py()
-    return _write_download_file(app, name, 'marimo.py', header + source)
+    return _write_download_file(app, name, _FMT_MARIMO, header + source)
 
 
 @functools.cache
@@ -1304,18 +1307,16 @@ def _build_download_entries(
         if fmt not in formats:
             continue
         label = link_labels[fmt]
+        filename = _download_filename(name, fmt)
         if fmt == _FMT_PYTHON:
-            filename = _download_filename(name, 'py')
             header = header_for(fmt, f'Run this script with: uv run {filename}')
             rel_path = _write_python_script(app, name, header + source)
         elif fmt == _FMT_JUPYTER:
-            filename = _download_filename(name, 'ipynb')
             run_line = (
                 _jupyter_run_line(deps[fmt], requires_python_for(fmt), filename) if deps else None
             )
             rel_path = _write_jupyter_notebook(app, name, notebook_for(run_line))
         else:
-            filename = _download_filename(name, 'marimo.py')
             run_line = f'Open this notebook with: uvx marimo edit --sandbox {filename}'
             rel_path = _write_marimo_notebook(
                 app, name, notebook_for(None), header_for(fmt, run_line)

@@ -29,7 +29,7 @@ def test_download_named_after_the_function_not_the_docname(tmp_path: Path):
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
 
     downloads_dir = html_dir / '_downloads'
-    python_files = [p for p in downloads_dir.rglob('*.py') if not p.name.endswith('.marimo.py')]
+    python_files = [p for p in downloads_dir.rglob('*.py') if not p.name.endswith('_marimo.py')]
     assert len(python_files) == 1, f'expected exactly one generated .py, got {python_files}'
     python_path = python_files[0]
 
