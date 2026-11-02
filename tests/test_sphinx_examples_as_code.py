@@ -22,7 +22,6 @@ from unittest.mock import Mock
 
 from docutils import nodes
 from docutils.core import publish_doctree
-from docutils.parsers.rst import DirectiveError
 import pytest
 import pyvista as pv
 from sphinx import addnodes
@@ -3567,39 +3566,3 @@ def test_drop_covered_keeps_pinned_platform_specific_and_cycles(fake_requires):
 def test_drop_covered_without_metadata_keeps_everything(fake_requires):
     fake_requires({})
     assert seac._drop_covered(['numpy', 'pyvista']) == ['numpy', 'pyvista']
-
-
-def test_page_dependencies_purge_and_merge():
-    env, other = SimpleNamespace(), SimpleNamespace()
-    seac._page_dependencies(env)['a'] = ['sympy']
-    seac._page_dependencies(other).update({'b': ['tqdm'], 'c': ['rich']})
-    seac._merge_page_dependencies(None, env, {'b'}, other)
-    assert seac._page_dependencies(env) == {'a': ['sympy'], 'b': ['tqdm']}
-    seac._purge_page_dependencies(None, env, 'a')
-    seac._purge_page_dependencies(None, env, 'missing')
-    assert seac._page_dependencies(env) == {'b': ['tqdm']}
-
-
-def _run_dependencies_directive(argument: str, env: SimpleNamespace) -> list[nodes.Node]:
-    """Run ``examples-as-code-dependencies`` with ``argument`` on page ``page``."""
-    state = Mock()
-    state.document.settings.env = env
-    directive = seac._DependenciesDirective(
-        'examples-as-code-dependencies', [argument], {}, [], 1, 0, '', state, Mock()
-    )
-    return directive.run()
-
-
-def test_dependencies_directive_records_requirements():
-    env = SimpleNamespace(docname='page')
-    assert _run_dependencies_directive('sympy, tqdm>=4', env) == []
-    _run_dependencies_directive('rich', env)
-    assert seac._page_dependencies(env) == {'page': ['sympy', 'tqdm>=4', 'rich']}
-
-
-def test_dependencies_directive_invalid_requirement():
-    env = SimpleNamespace(docname='page')
-    with pytest.raises(DirectiveError) as excinfo:
-        _run_dependencies_directive('sympy not!valid', env)
-    assert excinfo.value.msg.startswith("Invalid requirement 'not!valid'")
-    assert seac._page_dependencies(env) == {}

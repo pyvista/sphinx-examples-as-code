@@ -128,15 +128,7 @@ Imports are read from the code, not run. Each imported top-level module maps to 
 project that provides it in the environment building the docs; standard-library
 modules, relative imports and modules no single installed project provides are left
 out. Projects the code needs but never imports, such as an optional backend, go in
-`dependencies`, or for a single page in an `examples-as-code-dependencies` directive anywhere on it.
-It takes PEP 508 requirements separated by spaces or commas, adds them to every download from
-that page, and renders nothing:
-
-```rst
-.. examples-as-code-dependencies:: sympy imageio-ffmpeg>=0.4
-```
-
-In a Sphinx-Gallery example, put it in the example's docstring. In Python scripts and Jupyter notebooks, a dependency with no version or extras of
+`dependencies`, or are imported explicitly in the example. In Python scripts and Jupyter notebooks, a dependency with no version or extras of
 its own is left out when another listed one already installs it on every platform, e.g. `numpy`
 next to `pyvista`. marimo notebooks list every dependency, since marimo's sandbox adds back any
 it does not find by name.
