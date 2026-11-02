@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import doctest
+import inspect
 import io
 import json
 import re
@@ -507,6 +508,7 @@ Actor (...)
 Color(name='red', hex='#ff0000ff', opacity=255)
 >>> pl.renderer.actors
 {...}
+>>> pl.close()
 """,
     'validate_mesh': """
 >>> import pyvista as pv
@@ -525,8 +527,6 @@ MeshValidationReport(...)
 @pytest.mark.parametrize('name', _PYVISTA_DOCTESTS)
 def test_script_displays_pyvista_doctest_output(name: str):
     source = _PYVISTA_DOCTESTS[name]
-    if name == 'validate_mesh' and not hasattr(pv.DataSet, 'validate_mesh'):
-        pytest.skip('validate_mesh needs a newer pyvista')
     expected = _doctest_display(source)
     assert expected.strip()
     assert _script_display(source) == expected
@@ -543,8 +543,7 @@ def test_script_displays_pyvista_doctest_output(name: str):
 )
 def test_script_displays_pyvista_docstring_output(name: str):
     owner, attribute = name.split('.')
-    member = getattr(getattr(pv, owner), attribute)
-    source = (member.fget if isinstance(member, property) else member).__doc__
+    source = inspect.getdoc(getattr(getattr(pv, owner), attribute))
     assert _script_display(source) == _doctest_display(source)
 
 
