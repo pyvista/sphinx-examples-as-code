@@ -47,6 +47,9 @@ TAG = re.compile(r'<[^>]+>')
 NUMBER = re.compile(r'[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?')
 # marimo's converter renames a redefinition ``x`` to ``x_1`` and a cell-local ``x`` to ``_x``.
 MARIMO_NAME = re.compile(r'^_?(.+?)(?:_\d+)?$')
+# A value marimo shows inside a JSON container, e.g. ``text/plain+float:0.5``.
+MIME_LEAF = re.compile(r'^((?:text|application|image)/[\w.+-]+):(.*)$', re.DOTALL)
+NUMPY_SCALAR = re.compile(r'\bnp\.\w+\(([^()]*)\)')
 PRIVATE_NAME_ERROR = re.compile(r"NameError: name '_\w+' is not defined")
 CHECK_FLAGS = doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE
 # Finding kinds, in report order, with their headings.
@@ -200,8 +203,9 @@ def same_output(want: str, got: str) -> bool:
     got = round_like(want, got)
     if doctest.OutputChecker().check_output(want, got, CHECK_FLAGS):
         return True
+    want, got = (NUMPY_SCALAR.sub(r'\1', text.strip()) for text in (want, got))
     try:
-        return as_lists(ast.literal_eval(want.strip())) == as_lists(ast.literal_eval(got.strip()))
+        return as_lists(ast.literal_eval(want)) == as_lists(ast.literal_eval(got))
     except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
         return False
 
@@ -220,12 +224,35 @@ def output_text(outputs: list[dict]) -> str | None:
                 parts.append(text['text/plain'] + '\n')
             elif 'application/json' in data:
                 value = data['application/json']
-                parts.append(repr(json.loads(value) if isinstance(value, str) else value) + '\n')
+                shown = json_repr(json.loads(value) if isinstance(value, str) else value)
+                if shown is None:
+                    return None
+                parts.append(shown + '\n')
             elif text.get('text/html', '').startswith('<pre'):
                 parts.append(html.unescape(TAG.sub('', text['text/html'])) + '\n')
             elif kind == 'execute_result' or 'text/html' in text:
                 return None
+        elif kind == 'error':
+            return None
     return ''.join(parts)
+
+
+def json_repr(value: object) -> str | None:
+    """Return the repr of a JSON value marimo shows, or None if a leaf is not plain text."""
+    if isinstance(value, str):
+        match = MIME_LEAF.match(value)
+        if match is None:
+            return repr(value)
+        return match[2] if match[1].startswith('text/plain') else None
+    if isinstance(value, (list, dict)):
+        pairs = value.items() if isinstance(value, dict) else [(None, v) for v in value]
+        shown = [(key, json_repr(item)) for key, item in pairs]
+        if any(item is None for _, item in shown):
+            return None
+        if isinstance(value, list):
+            return '[' + ', '.join(item for _, item in shown) + ']'
+        return '{' + ', '.join(f'{key!r}: {item}' for key, item in shown) + '}'
+    return repr(value)
 
 
 def find(cells: list[list[str]], target: list[str], used: set) -> tuple[int, int] | None:

@@ -302,6 +302,7 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ("{'a': (1, 2)}\n", "{'a': [1, 2]}\n", True),
         ('array([1, 2])\n', 'array([1,\n       2])\n', True),
         ('x\n', 'y\n', False),
+        ('(np.uint8(0), np.uint8(117))\n', '[0, 117]\n', True),
     ],
 )
 def test_same_output(want: str, got: str, same: bool):
@@ -321,6 +322,20 @@ def test_output_text():
         == 'a\n1\n[1, 2]\na < b\n'
     )
     assert audit.output_text([rich]) is None
+    assert audit.output_text([{'output_type': 'error'}]) is None
+
+
+@pytest.mark.parametrize(
+    ('value', 'shown'),
+    [
+        (['text/plain+float:0.5', 'text/plain:x', 'plain'], "[0.5, x, 'plain']"),
+        ({'a': [True, None]}, "{'a': [True, None]}"),
+        (['text/html:<div></div>'], None),
+        ({'a': 'image/png:abc'}, None),
+    ],
+)
+def test_json_repr(value: object, shown: str | None):
+    assert audit.json_repr(value) == shown
 
 
 def test_expectations_skip_blocks_before_any_link(tmp_path: Path):
