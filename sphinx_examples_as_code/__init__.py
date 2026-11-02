@@ -1006,20 +1006,29 @@ def _drop_future_imports(source: list[str]) -> list[str]:
     return [line for i, line in enumerate(source, start=1) if i not in dropped]
 
 
+# Stands in for a line's leading % so marimo does not read it as an IPython magic.
+_PERCENT_MARK = '\ue000'
+
+
+def _mark_percent_lines(source: list[str]) -> list[str]:
+    """Replace the ``%`` that starts a line with ``_PERCENT_MARK``."""
+    return [_PERCENT_MARK + line[1:] if line.startswith('%') else line for line in source]
+
+
 def _write_marimo_notebook(app: Sphinx, name: str, notebook: dict, header: str = '') -> str:
     """Convert a generated Jupyter notebook with marimo's own converter and write it."""
     from marimo._convert.converters import MarimoConvert
 
     # A __future__ import inside a marimo cell is a SyntaxError when run as a script.
     cells = [
-        {**cell, 'source': _drop_future_imports(cell['source'])}
+        {**cell, 'source': _mark_percent_lines(_drop_future_imports(cell['source']))}
         if cell['cell_type'] == 'code'
         else cell
         for cell in notebook['cells']
     ]
     ir = MarimoConvert.from_ipynb(json.dumps({**notebook, 'cells': cells})).to_ir()
     source = MarimoConvert.from_ir(replace(ir, cells=_title_first(ir.cells))).to_py()
-    return _write_download_file(app, name, _FMT_MARIMO, header + source)
+    return _write_download_file(app, name, _FMT_MARIMO, header + source.replace(_PERCENT_MARK, '%'))
 
 
 @functools.cache
