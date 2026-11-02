@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -346,6 +348,32 @@ def test_convert_doctest_block_trailing_blank_trimmed():
     node = nodes.doctest_block('', '>>> x = 1\n\n')
     segments = seac._convert_doctest_block(node)
     assert segments == [('code', ['x = 1'])]
+
+
+def test_convert_doctest_block_breaks_after_output():
+    doctree = _parse('>>> a = 1\n>>> a\n1\n>>> b = 2\n>>> b\n2')
+    segments = seac._convert_doctest_block(doctree[0])
+    assert segments == [('code', ['a = 1', 'a']), ('break', []), ('code', ['b = 2', 'b'])]
+
+
+def test_convert_doctest_block_break_keeps_blank_lines():
+    node = nodes.doctest_block('', '>>> a\n1\n\n>>> b')
+    segments = seac._convert_doctest_block(node)
+    assert segments == [('code', ['a']), ('break', ['']), ('code', ['b'])]
+
+
+def test_convert_doctest_source_split_script_unchanged():
+    segments = seac._convert_doctest_source('>>> a\n1\n\n>>> b\n2\n>>> c\n3')
+    assert seac._join_segments(segments) == ['a', '', 'b', 'c']
+
+
+def test_convert_doctest_source_split_cells():
+    segments = seac._convert_doctest_source('>>> a = 1\n>>> a\n1\n\n>>> a = 2\n>>> a\n2')
+    assert seac._segments_to_cells([('text', ['# prose']), *segments]) == [
+        ('markdown', ['prose']),
+        ('code', ['a = 1', 'a']),
+        ('code', ['a = 2', 'a']),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -3117,6 +3145,22 @@ def test_write_marimo_notebook_keeps_percent_lines(tmp_path: Path):
     assert 'magic command' not in source
     assert seac._PERCENT_MARK not in source
     assert '    art = """\n    % %\n    %%  %\n    """\n    x = 5 % 3\n' in source
+
+
+def test_write_marimo_notebook_split_doctest_runs(tmp_path: Path):
+    segments = seac._convert_doctest_source('>>> x = 1\n>>> x\n1\n>>> x = x + 1\n>>> x\n2')
+    notebook = seac._build_notebook(seac._segments_to_cells(segments))
+    rel_path = seac._write_marimo_notebook(Mock(outdir=str(tmp_path)), 'split', notebook)
+    marimo_path = tmp_path / '_downloads' / rel_path
+    result = subprocess.run(
+        [sys.executable, str(marimo_path)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=marimo_path.parent,
+        check=False,
+    )
+    assert result.returncode == 0, f'{result.stdout}\n{result.stderr}'
 
 
 @pytest.mark.parametrize(
