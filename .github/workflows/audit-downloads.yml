@@ -55,6 +55,10 @@ on:
       timeout-minutes:
         type: number
         default: 360
+      exclude:
+        description: Space-separated glob patterns of example names not to run, e.g. ones that delete files.
+        type: string
+        default: ''
       allow:
         description: Space-separated finding kinds that do not fail the audit.
         type: string
@@ -173,9 +177,11 @@ jobs:
       env:
         FORMAT: ${{ matrix.format }}
         HTML: docs-artifact/${{ inputs.html-path }}
+        EXCLUDE: ${{ inputs.exclude }}
+      # shellcheck disable=SC2086 # EXCLUDE is a list of words
       run: >-
         python -m sphinx_examples_as_code.audit run "$HTML/_downloads" --html "$HTML"
-        --format "$FORMAT" --output "results-${FORMAT}.jsonl"
+        --format "$FORMAT" --output "results-${FORMAT}.jsonl" --exclude $EXCLUDE
 
     - name: Find download links missing a format
       if: strategy.job-index == 0

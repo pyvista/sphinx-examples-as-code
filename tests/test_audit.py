@@ -162,6 +162,13 @@ def test_run_python(site: Path, tmp_path: Path):
     assert _kinds(results['d/hint.py']) == ['dependency']
     assert _kinds(results['d/fails.py']) == ['error']
 
+    output = tmp_path / 'excluded.jsonl'
+    downloads = str(site / '_downloads')
+    args = ['run', downloads, '--format', 'python', '--output', str(output)]
+    audit.main([*args, '--exclude', 'fail*', '?ndeclared'])
+    names = {json.loads(line)['name'] for line in output.read_text().splitlines()}
+    assert names == {'good', 'dropped', 'prompt', 'probe', 'hint'}
+
 
 @pytest.mark.skipif(importlib.util.find_spec('nbconvert') is None, reason='needs nbconvert')
 def test_run_jupyter(site: Path, tmp_path: Path):

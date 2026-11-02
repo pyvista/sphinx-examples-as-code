@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import as_completed
 from dataclasses import dataclass
 import doctest
+import fnmatch
 import html
 import json
 import os
@@ -441,7 +442,11 @@ def run(args: argparse.Namespace) -> None:
     downloads = args.downloads.resolve()
     expected = expectations(args.html.resolve()) if args.html else {}
     linked = set(expected) if args.html else None
-    files = collect(downloads, args.format, linked)[: args.limit]
+    files = [
+        f
+        for f in collect(downloads, args.format, linked)
+        if not any(fnmatch.fnmatch(stem(f), pattern) for pattern in args.exclude)
+    ][: args.limit]
     print(f'{len(files)} {args.format} downloads in {downloads}', flush=True)
     failed = 0
     with ThreadPoolExecutor(args.workers) as pool, args.output.open('w') as out:
@@ -564,6 +569,9 @@ def main(argv: list[str] | None = None) -> None:
     run_parser.add_argument('--workers', type=int, default=os.cpu_count())
     run_parser.add_argument('--timeout', type=float, default=300, help='seconds per stage')
     run_parser.add_argument('--limit', type=int, help='run only the first N files')
+    run_parser.add_argument(
+        '--exclude', nargs='*', default=[], help='glob patterns of example names not to run'
+    )
     run_parser.set_defaults(func=run)
 
     pages_parser = sub.add_parser('pages', help='find download links missing a format')

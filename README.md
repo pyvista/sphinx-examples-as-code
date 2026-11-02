@@ -297,6 +297,8 @@ With `--html`, only downloads a page links to are run. Each finding has a kind:
 - Scripts run one top-level statement at a time. An import of a module that only
   distributions outside the `dependencies` of the script's inline metadata provide fails,
   as it would in the environment `uv run` builds.
+- Downloads run in the current environment and user account. Pass `--exclude` with glob
+  patterns of example names to skip any that delete or overwrite files, e.g. a cache.
 - Expected outputs come from the doctest blocks after each download link, compared with
   `ELLIPSIS`, `NORMALIZE_WHITESPACE` and pytest's `NUMBER`.
 - `report` lists findings by kind and fails on all of them but `python-mismatch` and
