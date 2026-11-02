@@ -135,6 +135,8 @@ _GALLERY_LINENOS_CLASS = 'linenos'
 #   'break'     a notebook cell boundary inside one code block; its lines
 #               (blank, if any) are kept in the joined script, dropped from
 #               notebooks
+#   'end'       a notebook cell boundary after a code block; no lines, no
+#               effect on spacing
 Segment = tuple[str, list[str]]
 
 # Replacements for non-ASCII chars
@@ -360,8 +362,8 @@ def _convert_doctest_source(source: str) -> list[Segment]:
     """Convert doctest text, stripping ``>>> ``/``... `` prompts.
 
     Non-prompted, non-blank lines are doctest *output* -- dropped entirely,
-    not kept as comments. A ``break`` segment follows each statement with
-    output that is not the last.
+    not kept as comments. A statement with output is followed by a ``break``
+    segment, or by ``end`` if it is the last.
     """
     segments: list[Segment] = []
     lines: list[str] = []
@@ -387,6 +389,12 @@ def _convert_doctest_source(source: str) -> list[Segment]:
         lines.pop()
     if lines:
         segments.append(('code', lines))
+    elif segments:
+        # the last prompt was empty: drop the break before it
+        segments.pop()
+        has_output = True
+    if has_output and segments:
+        segments.append(('end', []))
     return segments
 
 
@@ -902,8 +910,8 @@ def _segments_to_cells(segments: list[Segment]) -> list[tuple[str, list[str]]]:
 
     A run of ``code`` segments becomes a code cell; a run of ``text``/
     ``directive`` segments becomes a markdown cell (same spacing rules as
-    ``_join_segments``, with the ``#`` prefix stripped). A ``break`` segment
-    ends the current cell.
+    ``_join_segments``, with the ``#`` prefix stripped). A ``break`` or
+    ``end`` segment ends the current cell.
     """
     cells: list[tuple[str, list[str]]] = []
     run: list[Segment] = []
@@ -923,7 +931,7 @@ def _segments_to_cells(segments: list[Segment]) -> list[tuple[str, list[str]]]:
         )
 
     for kind, lines in segments:
-        if kind == 'break':
+        if kind in ('break', 'end'):
             _flush()
             run, run_kind = [], None
             continue
