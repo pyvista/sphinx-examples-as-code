@@ -164,9 +164,11 @@ What happens to the content of an Examples section:
 
 - Doctest blocks (`>>> ...` / `... ...`) keep their input lines, prompts stripped, as
   real Python source. Doctest *output* lines are dropped. In Python scripts, an
-  expression that has output is wrapped in `print()`. In notebooks, a statement that has
+  expression that has output is wrapped in `print(repr())`, so running the script
+  prints what the doctest shows. In notebooks, a statement that has
   output ends its code cell.
-- `.. code-block:: python` (or `py`) blocks are kept as-is; other languages become
+- `.. code-block:: python` (or `py`) blocks are kept as-is, unless they start with `>>>`,
+  which converts them like a doctest block; other languages become
   comments, set off with blank lines on both sides like any other directive.
 - Admonitions (`.. note::`, `.. warning::`, ...) become a `# LABEL:` comment followed by
   their content as comments, indented one level under the label in Python scripts only.

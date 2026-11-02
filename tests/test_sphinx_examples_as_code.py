@@ -7,8 +7,12 @@ through a full build (mocked Sphinx app, hand-built doctree fragments).
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import doctest
+import io
 import json
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -19,6 +23,7 @@ from docutils import nodes
 from docutils.core import publish_doctree
 from docutils.parsers.rst import DirectiveError
 import pytest
+import pyvista as pv
 from sphinx import addnodes
 from sphinx.errors import ConfigError
 from sphinx_gallery._doctree_links import code_links_block
@@ -397,11 +402,20 @@ def test_convert_doctest_blocks_split_after_output():
 @pytest.mark.parametrize(
     ('source', 'expected'),
     [
-        ('>>> a = 1\n>>> a\n1', ['a = 1', 'print(a)']),
-        ('>>> a = 1; a\n1', ['a = 1; print(a)']),
-        ('>>> f(1,\n...   2)  # note\n3', ['print(f(1,', '  2))  # note']),
-        (">>> s = 'é'; s\n'é'", ["s = 'é'; print(s)"]),
-        ('>>> a\n1\n>>> b\n>>> c\n3', ['print(a)', 'b', 'print(c)']),
+        ('>>> a = 1\n>>> a\n1', ['a = 1', 'print(repr(a))']),
+        ('>>> a = 1; a\n1', ['a = 1; print(repr(a))']),
+        ('>>> f(1,\n...   2)  # note\n3', ['print(repr(f(1,', '  2)))  # note']),
+        (">>> s = 'é'; s\n'é'", ["s = 'é'; print(repr(s))"]),
+        ('>>> a\n1\n>>> b\n>>> c\n3', ['print(repr(a))', 'b', 'print(repr(c))']),
+        (
+            '>>> mesh.find_closest_point((0, 0, 1))\n7',
+            ['print(repr(mesh.find_closest_point((0, 0, 1))))'],
+        ),
+        ('>>> a, b\n(1, 2)', ['print(repr((a, b)))']),
+        ('>>> (a, b)\n(1, 2)', ['print(repr((a, b)))']),
+        ('>>> (a), (b)\n(1, 2)', ['print(repr(((a), (b))))']),
+        ('>>> *a, b\n(1, 2)', ['print(repr((*a, b)))']),
+        ('>>> a,\n(1,)', ['print(repr((a,)))']),
         ('>>> print(1)\n1', ['print(1)']),
         ('>>> a = f()\nwarning', ['a = f()']),
         ('>>> for i in r:\n...     i\n0', ['for i in r:', '    i']),
@@ -413,13 +427,134 @@ def test_convert_doctest_source_print_output(source: str, expected: list[str]):
     assert seac._join_segments(segments) == expected
 
 
+class _RecordingChecker(doctest.OutputChecker):
+    """Accept any output, keeping what each example actually displayed."""
+
+    def __init__(self) -> None:
+        self.got: list[str] = []
+
+    def check_output(self, want: str, got: str, optionflags: int) -> bool:
+        self.got.append(got)
+        return True
+
+
+_HEX_ADDRESS = re.compile(r'0x[0-9a-fA-F]+')
+
+
+def _doctest_display(source: str) -> str:
+    """Run ``source`` as doctest does and return everything it displayed."""
+    checker = _RecordingChecker()
+    runner = doctest.DocTestRunner(checker=checker)
+    test = doctest.DocTestParser().get_doctest(source, {}, 'example', None, 0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        runner.run(test, out=lambda _text: None)
+    assert runner.failures == 0
+    return _HEX_ADDRESS.sub('0x', ''.join(checker.got))
+
+
+def _script_display(source: str) -> str:
+    """Run the Python script converted from ``source`` and return its stdout."""
+    lines = seac._join_segments(seac._convert_doctest_source(source, print_output=True))
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        exec(compile('\n'.join(lines), '<script>', 'exec'), {})  # noqa: S102
+    return _HEX_ADDRESS.sub('0x', stdout.getvalue())
+
+
+_PYVISTA_DOCTESTS = {
+    'mesh': """
+>>> import pyvista as pv
+>>> mesh = pv.Sphere()
+>>> mesh
+PolyData (...)
+>>> mesh.n_points
+842
+>>> mesh.n_points, mesh.n_cells
+(842, 1680)
+>>> mesh.bounds
+BoundsTuple(...)
+""",
+    'arrays': """
+>>> import pyvista as pv
+>>> mesh = pv.Sphere()
+>>> mesh.point_data
+pyvista DataSetAttributes
+...
+>>> mesh.active_normals[:2]
+pyvista_ndarray(...)
+>>> mesh.point_data.active_normals_name
+'Normals'
+>>> mesh.get_array_association('Normals')
+<FieldAssociation.POINT: 0>
+""",
+    'method_calls': """
+>>> import pyvista as pv
+>>> mesh = pv.Sphere()
+>>> mesh.find_closest_point((0, 0, 1))
+0
+>>> mesh.find_closest_cell((0, 0, 1))
+0
+>>> mesh.compute_cell_sizes(length=False, volume=False).cell_data['Area'][:3]
+pyvista_ndarray(...)
+""",
+    'plotter': """
+>>> import pyvista as pv
+>>> pl = pv.Plotter(off_screen=True)
+>>> actor = pl.add_mesh(pv.Cube(), color='red')
+>>> actor
+Actor (...)
+>>> actor.prop.color
+Color(name='red', hex='#ff0000ff', opacity=255)
+>>> pl.renderer.actors
+{...}
+""",
+    'validate_mesh': """
+>>> import pyvista as pv
+>>> report = pv.Sphere().validate_mesh()
+>>> report.is_valid
+True
+>>> print(report)
+Mesh Validation Report
+...
+>>> report
+MeshValidationReport(...)
+""",
+}
+
+
+@pytest.mark.parametrize('name', _PYVISTA_DOCTESTS)
+def test_script_displays_pyvista_doctest_output(name: str):
+    source = _PYVISTA_DOCTESTS[name]
+    if name == 'validate_mesh' and not hasattr(pv.DataSet, 'validate_mesh'):
+        pytest.skip('validate_mesh needs a newer pyvista')
+    expected = _doctest_display(source)
+    assert expected.strip()
+    assert _script_display(source) == expected
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'DataSet.get_array',
+        'DataSet.find_closest_point',
+        'DataSet.point_data',
+        'DataSet.active_scalars_name',
+    ],
+)
+def test_script_displays_pyvista_docstring_output(name: str):
+    owner, attribute = name.split('.')
+    member = getattr(getattr(pv, owner), attribute)
+    source = (member.fget if isinstance(member, property) else member).__doc__
+    assert _script_display(source) == _doctest_display(source)
+
+
 def test_convert_node_prints_doctest_output_in_python_only():
     doctree = _parse('>>> a\n1\n')
-    assert seac._convert_node(doctree[0], _ctx(fmt='python'))[0] == ('code', ['print(a)'])
+    assert seac._convert_node(doctree[0], _ctx(fmt='python'))[0] == ('code', ['print(repr(a))'])
     assert seac._convert_node(doctree[0], _ctx(fmt='jupyter'))[0] == ('code', ['a'])
 
 
-@pytest.mark.parametrize(('fmt', 'expected'), [('python', 'print(a)'), ('jupyter', 'a')])
+@pytest.mark.parametrize(('fmt', 'expected'), [('python', 'print(repr(a))'), ('jupyter', 'a')])
 def test_convert_node_literal_block_doctest_print_output(fmt: str, expected: str):
     node = nodes.literal_block('', '>>> a\n1', language='python')
     assert seac._convert_node(node, _ctx(fmt=fmt))[0] == ('code', [expected])
