@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,8 @@ NUMBER = re.compile(r'[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?')
 MARIMO_NAME = re.compile(r'^_?(.+?)(?:_\d+)?$')
 # A value marimo shows inside a JSON container, e.g. ``text/plain+float:0.5``.
 MIME_LEAF = re.compile(r'^((?:text|application|image)/[\w.+-]+):(.*)$', re.DOTALL)
+# IPython shows a class as its dotted name, without ``<class '...'>``.
+CLASS_REPR = re.compile(r"<class '([\w.]+)'>")
 NUMPY_SCALAR = re.compile(r'\bnp\.\w+\(([^()]*)\)')
 PRIVATE_NAME_ERROR = re.compile(r"NameError: name '_\w+' is not defined")
 # Script findings that mean the script itself does not run.
@@ -203,7 +206,7 @@ def as_lists(value: object) -> object:
 
 def same_output(want: str, got: str) -> bool:
     """Compare a displayed value with a doctest's expected output (``ELLIPSIS``, ``NUMBER``)."""
-    got = round_like(want, got)
+    want, got = CLASS_REPR.sub(r'\1', want), CLASS_REPR.sub(r'\1', round_like(want, got))
     if doctest.OutputChecker().check_output(want, got, CHECK_FLAGS):
         return True
     want, got = (NUMPY_SCALAR.sub(r'\1', text.strip()) for text in (want, got))
@@ -231,6 +234,8 @@ def output_text(outputs: list[dict]) -> str | None:
             parts.append(''.join(out['text']))
         elif kind in ('execute_result', 'display_data'):
             data = out['data']
+            if kind == 'display_data' and any(key.startswith('image/') for key in data):
+                continue
             text = {key: ''.join(v) for key, v in data.items() if isinstance(v, (str, list))}
             if 'text/plain' in text:
                 parts.append(text['text/plain'] + '\n')
@@ -406,7 +411,9 @@ def execute(path: Path, fmt: str, timeout: float, expected: list[Expected]) -> d
     compared = 0
     env = {**os.environ, **ENV}
     with tempfile.TemporaryDirectory(prefix='seac-audit-') as tmp:
-        for stage, cmd in commands(path, fmt, tmp):
+        # Notebook runners write next to the file they run, so run a copy.
+        copy = Path(shutil.copy(path, tmp))
+        for stage, cmd in commands(copy, fmt, tmp):
             try:
                 proc = subprocess.run(
                     cmd,

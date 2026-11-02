@@ -93,6 +93,7 @@ def site(tmp_path: Path) -> Path:
         + '    raise ImportError("pip install pytest")\n',
         'd/fails.py': 'raise ValueError("boom")\n',
         'd/fails.ipynb': _notebook('raise ValueError("boom")'),
+        'e/writes.ipynb': _notebook('open("out.txt", "w").close()'),
     }
     for name, text in files.items():
         path = downloads / name
@@ -198,6 +199,8 @@ def test_run_jupyter(site: Path, tmp_path: Path):
     assert _kinds(results['c/percent.ipynb']) == ['syntax']
     assert _kinds(results['d/fails.ipynb']) == ['error']
     assert 'ValueError: boom' in results['d/fails.ipynb']['findings'][0]['message']
+    assert results['e/writes.ipynb']['findings'] == []
+    assert not (site / '_downloads' / 'e' / 'out.txt').exists()
 
 
 @pytest.mark.skipif(importlib.util.find_spec('marimo') is None, reason='needs marimo')
@@ -225,6 +228,7 @@ def test_run_marimo(site: Path, tmp_path: Path):
     assert 'magic' in _kinds(results['c/magic_marimo.py'])
     assert 'marimo-check' in _kinds(results['c/twice_marimo.py'])
     assert _kinds(results['c/rename_marimo.py']) == ['marimo-rename']
+    assert not list((site / '_downloads').rglob('__marimo__'))
 
 
 def test_pages(site: Path, tmp_path: Path):
@@ -321,6 +325,7 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ("{'a': (1, 2)}\n", "{'a': [1, 2]}\n", True),
         ('array([1, 2])\n', 'array([1,\n       2])\n', True),
         ('x\n', 'y\n', False),
+        ("(<class 'a.B'>, None)\n", '(a.B, None)\n', True),
         ('(np.uint8(0), np.uint8(117))\n', '[0, 117]\n', True),
     ],
 )
@@ -334,7 +339,7 @@ def test_output_text():
     plain = {'output_type': 'execute_result', 'data': {'text/plain': ['1']}}
     json_value = {'output_type': 'display_data', 'data': {'application/json': '[1, 2]'}}
     pre = {'output_type': 'display_data', 'data': {'text/html': "<pre class='x'>a &lt; b</pre>"}}
-    image = {'output_type': 'display_data', 'data': {'image/png': 'abc'}}
+    image = {'output_type': 'display_data', 'data': {'image/png': 'abc', 'text/plain': '<Image>'}}
     rich = {'output_type': 'display_data', 'data': {'text/html': '<table></table>'}}
     assert (
         audit.output_text([stream, stderr, plain, json_value, pre, image])
