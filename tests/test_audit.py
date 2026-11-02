@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import html
 import importlib.util
 import json
 from pathlib import Path
+import runpy
 import sys
 import textwrap
 
@@ -282,7 +284,7 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             'file': 'c/z.py',
             'name': 'z',
             'format': 'python',
-            'findings': [{'kind': 'dependency', 'message': "'q' from q"}],
+            'findings': [{'kind': 'dependency', 'message': "'q' from q"}] * 2,
         },
         {
             'file': 'c/z_marimo.py',
@@ -311,8 +313,33 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert github_output.read_text() == 'failures=4\n'
 
     allow = ['error', 'collapsed', 'mismatch', 'dependency', 'python-mismatch', 'python-error']
+    monkeypatch.delenv('GITHUB_OUTPUT')
     audit.main(['report', str(jsonl), '--output', str(report), '--allow', *allow])
     assert report.read_text().endswith('No failures.\n')
+    assert github_output.read_text() == 'failures=4\n'
+
+
+def test_run_progress(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    for i in range(100):
+        (tmp_path / f'e{i}.py').write_text('')
+    monkeypatch.setattr(audit, 'execute', lambda *_: {'findings': []})
+    audit.main(['run', str(tmp_path), '--format', 'python', '--output', str(tmp_path / 'r')])
+    assert '100/100 done, 0 with findings' in capsys.readouterr().out
+
+
+def test_entry_points(site: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    output = tmp_path / 'pages.jsonl'
+    monkeypatch.setattr(sys, 'argv', ['audit', 'pages', str(site), '--output', str(output)])
+    monkeypatch.delitem(sys.modules, 'sphinx_examples_as_code.audit')
+    runpy.run_module('sphinx_examples_as_code.audit', run_name='__main__')
+    assert output.exists()
+    script = tmp_path / 's.py'
+    script.write_text('x = 1\n')
+    monkeypatch.setattr(sys, 'argv', ['runner', str(script), str(tmp_path / 'out.json')])
+    monkeypatch.setattr(sys, 'path', list(sys.path))
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(runner.__file__, run_name='__main__')
+    assert exit_info.value.code == 0
 
 
 @pytest.mark.parametrize(
@@ -344,12 +371,20 @@ def test_output_text():
     json_list = {'output_type': 'display_data', 'data': {'application/json': [1, 2]}}
     pre = {'output_type': 'display_data', 'data': {'text/html': "<pre class='x'>a &lt; b</pre>"}}
     image = {'output_type': 'display_data', 'data': {'image/png': 'abc', 'text/plain': '<Image>'}}
+    other = {'output_type': 'display_data', 'data': {'application/pdf': 'abc'}}
     rich = {'output_type': 'display_data', 'data': {'text/html': '<table></table>'}}
+    rich_json = {'output_type': 'display_data', 'data': {'application/json': ['image/png:a']}}
     assert (
-        audit.output_text([stream, stderr, plain, json_value, json_list, pre, image])
+        audit.output_text([stream, stderr, plain, json_value, json_list, pre, image, other])
         == 'a\n1\n[1, 2]\n[1, 2]\na < b\n'
     )
     assert audit.output_text([rich]) is None
+    assert audit.output_text([rich_json]) is None
+    assert audit.notebook_units(Path('missing.ipynb')) == []
+    assert audit.notebook_error(Path('missing.ipynb')) == ''
+    assignment = ast.parse('x = 1').body[0]
+    assert not audit.is_value(assignment)
+    assert audit.printed(assignment) is assignment
     assert audit.output_text([{'output_type': 'error'}]) is None
 
 
@@ -419,7 +454,8 @@ def test_runner_hides_its_own_imports(tmp_path: Path):
 
 def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     script = tmp_path / 's.py'
-    script.write_text(HEADER + 'print("a")\nx = 1\nprint(x)\nimport pytest\n')
+    script.write_text(HEADER + 'print("a")\nx = 1\nimport seac_local\nprint(x)\nimport pytest\n')
+    (tmp_path / 'seac_local.py').write_text('')
     output = tmp_path / 'out.json'
     monkeypatch.setattr(sys, 'argv', ['runner', str(script), str(output)])
     monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
@@ -432,7 +468,8 @@ def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caps
     assert json.loads(output.read_text()) == [
         {'line': 6, 'stdout': 'a\n'},
         {'line': 7, 'stdout': ''},
-        {'line': 8, 'stdout': '1\n'},
+        {'line': 8, 'stdout': ''},
+        {'line': 9, 'stdout': '1\n'},
     ]
     assert f"{runner.BLOCKED} of 'pytest' from pytest" in capsys.readouterr().err
 
@@ -444,7 +481,10 @@ def test_runner_exit_codes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for source, code in [
         ('import sys\nsys.exit(0)\n', 0),
         ('import sys\nsys.exit(3)\n', 1),
-        ('import sys\nsys.stdout.buffer.flush()\nassert sys.stdout.encoding\n', 0),
+        (
+            'import sys\nsys.stdout.flush()\nsys.stdout.buffer.flush()\n',
+            0,
+        ),
     ]:
         script.write_text(source)
         monkeypatch.setattr(sys, 'argv', ['runner', str(script), str(output)])
@@ -454,7 +494,7 @@ def test_runner_exit_codes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_closure_and_metadata(monkeypatch: pytest.MonkeyPatch):
     assert runner.declared_dependencies('print(1)\n') is None
     assert runner.declared_dependencies(HEADER) == ['packaging']
-    assert runner.closure(['packaging', 'not-installed-at-all']) == {
+    assert runner.closure(['packaging', 'packaging', 'not-installed-at-all']) == {
         'packaging',
         'not-installed-at-all',
     }
@@ -463,3 +503,14 @@ def test_closure_and_metadata(monkeypatch: pytest.MonkeyPatch):
     assert runner.hidden_import(ValueError()) is None
     assert runner.hidden_import(ValueError('pip install q-dist')) == "'q' from q-dist"
     assert runner.hidden_import(ModuleNotFoundError(name='q.sub')) == "'q' from q-dist"
+    assert runner.hidden_import(ModuleNotFoundError(name='other')) is None
+
+
+def test_guard_unloads_packaging(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    monkeypatch.setattr(sys, 'modules', dict(sys.modules))
+    monkeypatch.setattr(runner.Guard, 'allowed', set())
+    monkeypatch.setattr(runner.Guard, 'providers', {})
+    runner.Guard.install(set())
+    assert 'packaging.version' not in sys.modules
+    assert runner.Guard.find_spec('json') is not None
