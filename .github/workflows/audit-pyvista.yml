@@ -1,0 +1,44 @@
+name: Audit PyVista downloads
+
+# Runs every example download of PyVista's latest main docs build and files an issue on failure.
+on:
+  workflow_dispatch:
+  schedule:
+  - cron: 0 6 2 * *  # the day after PyVista's monthly docs build
+  pull_request:
+    types: [labeled]  # the audit-downloads label runs it with the pull request's audit
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.label.name }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  cache-pyvista-data:
+    name: Cache pyvista/data
+    if: github.event_name != 'pull_request' || github.event.label.name == 'audit-downloads'
+    uses: pyvista/pyvista/.github/workflows/cache-pyvista-data.yml@ecc603bb3256de78e8d9d282adf36f05827bf015  # main
+    with:
+      runs-on: ubuntu-22.04
+
+  audit:
+    name: Audit
+    needs: cache-pyvista-data
+    uses: ./.github/workflows/audit-downloads.yml
+    permissions:
+      actions: read  # to find and download the docs build
+      contents: read
+      issues: write  # to file the report
+    with:
+      repository: pyvista/pyvista
+      artifact: docs-build-light
+      formats: '["python", "jupyter"]'  # marimo once PyVista's docs ship marimo downloads
+      runs-on: ubuntu-22.04
+      headless-display: true
+      cache-path: pyvista-data
+      cache-key: ${{ needs.cache-pyvista-data.outputs.key }}
+      setup: echo "PYVISTA_DATA=$GITHUB_WORKSPACE/pyvista-data" >> "$GITHUB_ENV"
+      install: uv pip install . --group docs
+      exclude: '*delete_downloads*'
+      issue-label: docs-download-failure
