@@ -88,6 +88,9 @@ def site(tmp_path: Path) -> Path:
         'c/rename_marimo.py': _marimo('_y += 1'),
         'd/undeclared.py': HEADER + 'import pytest\n',
         'd/probe.py': HEADER + 'import importlib.util\nprint(importlib.util.find_spec("pytest"))\n',
+        'd/hint.py': HEADER
+        + 'import importlib.util\nif not importlib.util.find_spec("pytest"):\n'
+        + '    raise ImportError("pip install pytest")\n',
         'd/fails.py': 'raise ValueError("boom")\n',
         'd/fails.ipynb': _notebook('raise ValueError("boom")'),
     }
@@ -156,6 +159,7 @@ def test_run_python(site: Path, tmp_path: Path):
     assert _kinds(results['d/undeclared.py']) == ['dependency']
     assert "'pytest' from pytest" in results['d/undeclared.py']['findings'][0]['message']
     assert results['d/probe.py']['findings'] == []
+    assert _kinds(results['d/hint.py']) == ['dependency']
     assert _kinds(results['d/fails.py']) == ['error']
 
 

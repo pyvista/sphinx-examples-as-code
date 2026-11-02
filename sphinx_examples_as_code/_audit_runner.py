@@ -83,14 +83,20 @@ class Guard(importlib.machinery.PathFinder):
         sys.meta_path[sys.meta_path.index(importlib.machinery.PathFinder)] = cls
 
 
-def hidden_import(exc: BaseException | None) -> str | None:
-    """Return the hidden module an exception or its context failed to import, if any."""
-    while exc is not None:
-        if isinstance(exc, ModuleNotFoundError) and exc.name:
-            top = exc.name.partition('.')[0]
+def hidden_import(exc: BaseException) -> str | None:
+    """Return the hidden module an exception failed to import, or that its traceback names."""
+    text = ''.join(traceback.format_exception(exc))
+    chained: BaseException | None = exc
+    while chained is not None:
+        if isinstance(chained, ModuleNotFoundError) and chained.name:
+            top = chained.name.partition('.')[0]
             if top in Guard.hidden:
                 return f'{top!r} from {Guard.hidden[top]}'
-        exc = exc.__cause__ or exc.__context__
+        chained = chained.__cause__ or chained.__context__
+    for module, dists in Guard.hidden.items():
+        names = '|'.join(map(re.escape, [module, *dists.split(', ')]))
+        if re.search(rf'\b({names})\b', text):
+            return f'{module!r} from {dists}'
     return None
 
 
