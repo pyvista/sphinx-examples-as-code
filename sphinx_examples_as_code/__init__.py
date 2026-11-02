@@ -336,14 +336,19 @@ def _join_segments(segments: list[Segment]) -> list[str]:
 
 
 def _convert_doctest_block(node: nodes.doctest_block) -> list[Segment]:
-    """Convert a doctest block, stripping ``>>> ``/``... `` prompts.
+    """Convert a doctest block; see ``_convert_doctest_source``."""
+    return _convert_doctest_source(node.astext())
+
+
+def _convert_doctest_source(source: str) -> list[Segment]:
+    """Convert doctest text, stripping ``>>> ``/``... `` prompts.
 
     Non-prompted, non-blank lines are doctest *output* -- dropped entirely,
     not kept as comments.
     """
     lines: list[str] = []
     has_code = False
-    for line in node.astext().splitlines():
+    for line in source.splitlines():
         if line.startswith('>>> ') or line == '>>>':
             lines.append(_clean_code_comment(line[4:]))
             has_code = True
@@ -382,6 +387,8 @@ def _convert_literal_block(node: nodes.Element) -> list[Segment]:
         language, source = node.get('language', ''), node.astext()
     # Case-insensitive: sphinx-gallery emits ``.. code-block:: Python`` (capitalized).
     if language.lower() in _PYTHON_LANGUAGES:
+        if source.lstrip().startswith('>>>'):
+            return _convert_doctest_source(source)
         lines = [_clean_code_comment(line) for line in source.splitlines()]
         while lines and not lines[-1].strip():
             lines.pop()
