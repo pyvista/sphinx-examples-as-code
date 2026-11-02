@@ -132,6 +132,11 @@ _GALLERY_LINENOS_CLASS = 'linenos'
 #   'directive' a comment block that must be visually set off with a blank
 #               line both before and after it (the title header; a
 #               ``# NOTE:``-style admonition block)
+#   'break'     a notebook cell boundary inside one code block; its lines
+#               (blank, if any) are kept in the joined script, dropped from
+#               notebooks
+#   'end'       a notebook cell boundary after a code block; no lines, no
+#               effect on spacing
 Segment = tuple[str, list[str]]
 
 # Replacements for non-ASCII chars
@@ -322,15 +327,25 @@ def _join_segments(segments: list[Segment]) -> list[str]:
       after it
     - otherwise (e.g. prose directly above a code block, or two prose
       segments back to back), no blank line is forced
+    - a ``break`` segment's lines are kept as is, and the code after it
+      continues the code before it with no blank line forced
     """
     lines: list[str] = []
     prev_kind: str | None = None
+    continued = False
     for kind, seg_lines in segments:
+        if kind == 'break':
+            lines.extend(seg_lines)
+            continued = True
+            continue
         if not seg_lines:
             continue
-        need_blank = prev_kind is not None and (
-            prev_kind == 'code' or kind == 'directive' or prev_kind == 'directive'
+        need_blank = (
+            not continued
+            and prev_kind is not None
+            and (prev_kind == 'code' or kind == 'directive' or prev_kind == 'directive')
         )
+        continued = False
         if need_blank:
             lines.append('')
         lines.extend(seg_lines)
@@ -347,24 +362,40 @@ def _convert_doctest_source(source: str) -> list[Segment]:
     """Convert doctest text, stripping ``>>> ``/``... `` prompts.
 
     Non-prompted, non-blank lines are doctest *output* -- dropped entirely,
-    not kept as comments.
+    not kept as comments. A statement with output is followed by a ``break``
+    segment, or by ``end`` if it is the last.
     """
+    segments: list[Segment] = []
     lines: list[str] = []
-    has_code = False
+    has_output = False
     for line in source.splitlines():
         if line.startswith('>>> ') or line == '>>>':
+            if has_output and lines:
+                blanks: list[str] = []
+                while lines and not lines[-1].strip():
+                    blanks.append(lines.pop())
+                segments += [('code', lines), ('break', blanks)]
+                lines = []
+            has_output = False
             lines.append(_clean_code_comment(line[4:]))
-            has_code = True
         elif line.startswith('... ') or line == '...':
             lines.append(_clean_code_comment(line[4:]))
         elif not line.strip():
             lines.append('')
-        # else: doctest output line - dropped
-    if not has_code:
-        return []
+        else:
+            # doctest output line - dropped
+            has_output = True
     while lines and not lines[-1].strip():
         lines.pop()
-    return [('code', lines)]
+    if lines:
+        segments.append(('code', lines))
+    elif segments:
+        # the last prompt was empty: drop the break before it
+        segments.pop()
+        has_output = True
+    if has_output and segments:
+        segments.append(('end', []))
+    return segments
 
 
 def _is_gallery_code_block(node: nodes.Node) -> bool:
@@ -879,7 +910,8 @@ def _segments_to_cells(segments: list[Segment]) -> list[tuple[str, list[str]]]:
 
     A run of ``code`` segments becomes a code cell; a run of ``text``/
     ``directive`` segments becomes a markdown cell (same spacing rules as
-    ``_join_segments``, with the ``#`` prefix stripped).
+    ``_join_segments``, with the ``#`` prefix stripped). A ``break`` or
+    ``end`` segment ends the current cell.
     """
     cells: list[tuple[str, list[str]]] = []
     run: list[Segment] = []
@@ -899,6 +931,10 @@ def _segments_to_cells(segments: list[Segment]) -> list[tuple[str, list[str]]]:
         )
 
     for kind, lines in segments:
+        if kind in ('break', 'end'):
+            _flush()
+            run, run_kind = [], None
+            continue
         if not lines:
             continue
         cell_kind = 'code' if kind == 'code' else 'markdown'
