@@ -3166,6 +3166,27 @@ def test_ships_compiled_wheel():
 
 
 @pytest.mark.parametrize(
+    ('tags', 'expected'),
+    [
+        (['cp314-cp314-macosx_14_0_arm64'], True),
+        (['py3-none-macosx_11_0_arm64'], False),
+        (['cp312-abi3-manylinux_2_17_x86_64'], False),
+        (['py3-none-any'], False),
+    ],
+)
+def test_ships_compiled_wheel_reads_abi_tag(
+    monkeypatch: pytest.MonkeyPatch, tags: list[str], expected: bool
+):
+    wheel = ''.join(f'Tag: {tag}\n' for tag in tags)
+    monkeypatch.setattr(
+        seac.importlib.metadata, 'distribution', lambda _name: Mock(read_text=lambda _f: wheel)
+    )
+    seac._ships_compiled_wheel.cache_clear()
+    assert seac._ships_compiled_wheel('dist') is expected
+    seac._ships_compiled_wheel.cache_clear()
+
+
+@pytest.mark.parametrize(
     ('floor', 'cap', 'expected'),
     [
         ('>=3.10', '<3.15', '>=3.10,<3.15'),

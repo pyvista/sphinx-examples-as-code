@@ -30,13 +30,19 @@ METADATA = re.compile(r'(?m)^# /// script$\s(?P<content>(^#(| .*)$\s)+)^# ///$')
 BLOCKED = 'sphinx-examples-as-code-audit: blocked import'
 
 
-def declared_dependencies(source: str) -> list[str] | None:
-    """Return the ``dependencies`` of a script's inline metadata, or None without a block."""
+def script_metadata(source: str) -> dict[str, Any] | None:
+    """Return a script's inline metadata, or None without a block."""
     match = METADATA.search(source)
     if match is None:
         return None
     content = ''.join(line[2:] for line in match['content'].splitlines(keepends=True))
-    return tomllib.loads(content).get('dependencies', [])
+    return tomllib.loads(content)
+
+
+def declared_dependencies(source: str) -> list[str] | None:
+    """Return the ``dependencies`` of a script's inline metadata, or None without a block."""
+    metadata = script_metadata(source)
+    return None if metadata is None else metadata.get('dependencies', [])
 
 
 def closure(requirements: list[str]) -> set[str]:

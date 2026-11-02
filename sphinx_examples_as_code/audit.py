@@ -17,6 +17,7 @@ import html
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import subprocess
@@ -24,10 +25,13 @@ import sys
 import tempfile
 import time
 
+from packaging.specifiers import SpecifierSet
+
 from . import _FORMAT_ORDER as FORMATS
 from . import _GALLERY_TIMING_CLASS as GALLERY_PAGE
 from . import _SUFFIXES as SUFFIXES
 from ._audit_runner import BLOCKED
+from ._audit_runner import script_metadata
 
 RUNNER = Path(__file__).with_name('_audit_runner.py')
 OUTPUT_TAIL = 4000
@@ -55,6 +59,8 @@ MIME_LEAF = re.compile(r'^((?:text|application|image)/[\w.+-]+):(.*)$', re.DOTAL
 CLASS_REPR = re.compile(r"<class '([\w.]+)'>")
 NUMPY_SCALAR = re.compile(r'\bnp\.\w+\(([^()]*)\)')
 PRIVATE_NAME_ERROR = re.compile(r"NameError: name '_\w+' is not defined")
+# The ``--python`` argument of a notebook's ``uvx`` run line.
+UVX_PYTHON = re.compile(r'\buvx --python ("[^"]*"|\S+)')
 # Script findings that mean the script itself does not run.
 SCRIPT_FAILURES = ('error', 'dependency', 'timeout')
 CHECK_FLAGS = doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE
@@ -64,6 +70,7 @@ KINDS = {
     'magic': 'Lines the marimo converter turned into IPython magics',
     'marimo-check': 'marimo check failures (e.g. multiple definitions)',
     'dependency': 'Imports the download does not declare as dependencies',
+    'python-version': '`requires-python` that excludes the Python running the audit',
     'collapsed': 'Doctest values hidden inside a notebook cell',
     'dropped-output': 'Doctest values the script does not print',
     'mismatch': "Notebook values that differ from the doctest's output while the script's match",
@@ -376,15 +383,29 @@ def notebook_error(path: Path) -> str:
     return ''
 
 
+def requires_python(text: str, fmt: str) -> str | None:
+    """Return the ``requires-python`` a download's script metadata or notebook run line names."""
+    if fmt == 'jupyter':
+        match = UVX_PYTHON.search(text)
+        return match[1].strip('"') if match else None
+    metadata = script_metadata(text)
+    return None if metadata is None else metadata.get('requires-python')
+
+
 def static_findings(path: Path, fmt: str) -> list[dict]:
     """Return the problems visible without running a download."""
     text = path.read_text(encoding='utf-8')
     if fmt == 'jupyter':
         cells = json.loads(text)['cells']
+        text = '\n'.join(''.join(c['source']) for c in cells)
         sources = [''.join(c['source']) for c in cells if c['cell_type'] == 'code']
     else:
         sources = [text]
     findings = []
+    spec = requires_python(text, fmt)
+    if spec is not None and platform.python_version() not in SpecifierSet(spec):
+        message = f'{spec} excludes Python {platform.python_version()}'
+        findings.append({'kind': 'python-version', 'message': message})
     for source in sources:
         try:
             ast.parse(source)

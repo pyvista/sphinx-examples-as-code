@@ -478,6 +478,36 @@ def test_static_findings_ignore_valid_code(tmp_path: Path):
     assert audit.static_findings(path, 'python') == []
 
 
+@pytest.mark.parametrize(
+    ('fmt', 'text'),
+    [
+        ('python', '# /// script\n# requires-python = "SPEC"\n# dependencies = []\n# ///\n'),
+        ('marimo', '# /// script\n# requires-python = "SPEC"\n# ///\nimport marimo\n'),
+        (
+            'jupyter',
+            _notebook('# `uvx --python "SPEC" --from jupyterlab`'),
+        ),
+    ],
+)
+def test_static_findings_requires_python(tmp_path: Path, fmt: str, text: str):
+    path = tmp_path / 'x'
+    running = f'{sys.version_info.major}.{sys.version_info.minor}'
+    path.write_text(text.replace('SPEC', f'>=3.8,<{running}'))
+    [finding] = audit.static_findings(path, fmt)
+    assert finding['kind'] == 'python-version'
+    assert finding['message'].startswith(f'>=3.8,<{running} excludes Python {running}.')
+    path.write_text(text.replace('SPEC', '>=3.8'))
+    assert audit.static_findings(path, fmt) == []
+
+
+@pytest.mark.parametrize(
+    ('fmt', 'text'),
+    [('python', 'x = 1\n'), ('marimo', '# /// script\n# ///\n'), ('jupyter', _notebook('x'))],
+)
+def test_requires_python_absent(fmt: str, text: str):
+    assert audit.requires_python(text, fmt) is None
+
+
 def test_stem_and_format():
     assert audit.stem(Path('a_marimo.py')) == 'a'
     assert audit.stem(Path('a.ipynb')) == 'a'

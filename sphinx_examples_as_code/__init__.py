@@ -1289,7 +1289,7 @@ def _newest_python_minor(name: str) -> int | None:
 
 @functools.cache
 def _ships_compiled_wheel(name: str) -> bool:
-    """Check whether an installed distribution's wheel is tagged for a platform or ABI."""
+    """Check whether an installed distribution's wheel is built for one Python version's ABI."""
     try:
         wheel = importlib.metadata.distribution(name).read_text('WHEEL') or ''
     except importlib.metadata.PackageNotFoundError:
@@ -1297,7 +1297,7 @@ def _ships_compiled_wheel(name: str) -> bool:
     tags = [
         line.partition(':')[2].strip() for line in wheel.splitlines() if line.startswith('Tag:')
     ]
-    return any(not tag.endswith('-none-any') for tag in tags)
+    return any(tag.split('-')[1] not in ('none', 'abi3') for tag in tags)
 
 
 def _python_upper_bound(deps: list[str], project: str | None = None) -> str | None:
