@@ -394,6 +394,37 @@ def test_convert_doctest_blocks_split_after_output():
     ]
 
 
+@pytest.mark.parametrize(
+    ('source', 'expected'),
+    [
+        ('>>> a = 1\n>>> a\n1', ['a = 1', 'print(a)']),
+        ('>>> a = 1; a\n1', ['a = 1; print(a)']),
+        ('>>> f(1,\n...   2)  # note\n3', ['print(f(1,', '  2))  # note']),
+        (">>> s = 'é'; s\n'é'", ["s = 'é'; print(s)"]),
+        ('>>> a\n1\n>>> b\n>>> c\n3', ['print(a)', 'b', 'print(c)']),
+        ('>>> print(1)\n1', ['print(1)']),
+        ('>>> a = f()\nwarning', ['a = f()']),
+        ('>>> for i in r:\n...     i\n0', ['for i in r:', '    i']),
+        ('>>> a)\n1', ['a)']),
+    ],
+)
+def test_convert_doctest_source_print_output(source: str, expected: list[str]):
+    segments = seac._convert_doctest_source(source, print_output=True)
+    assert seac._join_segments(segments) == expected
+
+
+def test_convert_node_prints_doctest_output_in_python_only():
+    doctree = _parse('>>> a\n1\n')
+    assert seac._convert_node(doctree[0], _ctx(fmt='python'))[0] == ('code', ['print(a)'])
+    assert seac._convert_node(doctree[0], _ctx(fmt='jupyter'))[0] == ('code', ['a'])
+
+
+@pytest.mark.parametrize(('fmt', 'expected'), [('python', 'print(a)'), ('jupyter', 'a')])
+def test_convert_node_literal_block_doctest_print_output(fmt: str, expected: str):
+    node = nodes.literal_block('', '>>> a\n1', language='python')
+    assert seac._convert_node(node, _ctx(fmt=fmt))[0] == ('code', [expected])
+
+
 def test_convert_doctest_source_split_cells():
     segments = seac._convert_doctest_source('>>> a = 1\n>>> a\n1\n\n>>> a = 2\n>>> a\n2')
     assert seac._segments_to_cells([('text', ['# prose']), *segments]) == [
