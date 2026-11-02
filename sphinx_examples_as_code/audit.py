@@ -25,6 +25,7 @@ import tempfile
 import time
 
 from . import _FORMAT_ORDER as FORMATS
+from . import _GALLERY_TIMING_CLASS as GALLERY_PAGE
 from . import _SUFFIXES as SUFFIXES
 from ._audit_runner import BLOCKED
 
@@ -38,7 +39,6 @@ ENV = {
 }
 # Left in place of any line marimo's converter mistook for an IPython magic.
 MAGIC_MARKER = '# magic command not supported in marimo'
-GALLERY_PAGE = 'sphx-glr-timing'
 DOWNLOAD_LINK = re.compile(
     r'<a class="reference download internal"[^>]*href="[^"]*?_downloads/([^"]+)"'
 )
@@ -196,7 +196,9 @@ def round_like(want: str, got: str) -> str:
 
 
 def as_lists(value: object) -> object:
-    """Return a literal with every tuple turned into a list, as JSON would show it."""
+    """Return a literal with every tuple turned into a list and bools kept apart from numbers."""
+    if isinstance(value, bool):
+        return ('bool', value)
     if isinstance(value, (list, tuple)):
         return [as_lists(item) for item in value]
     if isinstance(value, dict):
@@ -236,7 +238,12 @@ def output_text(outputs: list[dict]) -> str | None:
             data = out['data']
             if kind == 'display_data' and any(key.startswith('image/') for key in data):
                 continue
-            text = {key: ''.join(v) for key, v in data.items() if isinstance(v, (str, list))}
+            text = {
+                key: ''.join(v)
+                for key, v in data.items()
+                if isinstance(v, str)
+                or (isinstance(v, list) and all(isinstance(s, str) for s in v))
+            }
             if 'text/plain' in text:
                 parts.append(text['text/plain'] + '\n')
             elif 'application/json' in data:

@@ -8,14 +8,15 @@ from __future__ import annotations
 import ast
 import importlib.machinery
 import importlib.metadata
-import io
 import json
 from pathlib import Path
 import re
 import sys
 import tomllib
 import traceback
+from typing import Any
 from typing import ClassVar
+from typing import TextIO
 
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
@@ -77,10 +78,13 @@ class Guard(importlib.machinery.PathFinder):
 
     @classmethod
     def install(cls, allowed: set[str]) -> None:
-        """Replace the path finder with this one."""
+        """Replace the path finder with this one and unload the runner's own undeclared imports."""
         cls.allowed = allowed
         cls.providers = importlib.metadata.packages_distributions()
         sys.meta_path[sys.meta_path.index(importlib.machinery.PathFinder)] = cls
+        if 'packaging' not in allowed:
+            for name in [m for m in sys.modules if m.partition('.')[0] == 'packaging']:
+                del sys.modules[name]
 
 
 def hidden_import(exc: BaseException) -> str | None:
@@ -100,10 +104,10 @@ def hidden_import(exc: BaseException) -> str | None:
     return None
 
 
-class Tee(io.TextIOBase):
+class Tee:
     """Write to a stream while keeping a copy of what was written."""
 
-    def __init__(self, stream: io.TextIOBase) -> None:
+    def __init__(self, stream: TextIO) -> None:
         self.stream = stream
         self.parts: list[str] = []
 
@@ -120,6 +124,10 @@ class Tee(io.TextIOBase):
         """Return and forget what was written since the last call."""
         text, self.parts = ''.join(self.parts), []
         return text
+
+    def __getattr__(self, name: str) -> Any:
+        """Return the underlying stream's attribute."""
+        return getattr(self.stream, name)
 
 
 def main() -> int:

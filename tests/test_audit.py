@@ -327,6 +327,9 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ('x\n', 'y\n', False),
         ("(<class 'a.B'>, None)\n", '(a.B, None)\n', True),
         ('(np.uint8(0), np.uint8(117))\n', '[0, 117]\n', True),
+        ('True\n', '1\n', False),
+        ('[False]\n', '[0.0]\n', False),
+        ('(True, 1)\n', '[True, 1]\n', True),
     ],
 )
 def test_same_output(want: str, got: str, same: bool):
@@ -338,12 +341,13 @@ def test_output_text():
     stderr = {'output_type': 'stream', 'name': 'stderr', 'text': ['warning\n']}
     plain = {'output_type': 'execute_result', 'data': {'text/plain': ['1']}}
     json_value = {'output_type': 'display_data', 'data': {'application/json': '[1, 2]'}}
+    json_list = {'output_type': 'display_data', 'data': {'application/json': [1, 2]}}
     pre = {'output_type': 'display_data', 'data': {'text/html': "<pre class='x'>a &lt; b</pre>"}}
     image = {'output_type': 'display_data', 'data': {'image/png': 'abc', 'text/plain': '<Image>'}}
     rich = {'output_type': 'display_data', 'data': {'text/html': '<table></table>'}}
     assert (
-        audit.output_text([stream, stderr, plain, json_value, pre, image])
-        == 'a\n1\n[1, 2]\na < b\n'
+        audit.output_text([stream, stderr, plain, json_value, json_list, pre, image])
+        == 'a\n1\n[1, 2]\n[1, 2]\na < b\n'
     )
     assert audit.output_text([rich]) is None
     assert audit.output_text([{'output_type': 'error'}]) is None
@@ -406,6 +410,13 @@ def test_timeout(tmp_path: Path):
     assert result['findings'] == [{'kind': 'timeout', 'message': 'run after 0.5 s'}]
 
 
+def test_runner_hides_its_own_imports(tmp_path: Path):
+    path = tmp_path / 's.py'
+    path.write_text('# /// script\n# dependencies = []\n# ///\nimport packaging.version\n')
+    findings = audit.execute(path, 'python', 60, [])['findings']
+    assert [f['kind'] for f in findings] == ['dependency']
+
+
 def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     script = tmp_path / 's.py'
     script.write_text(HEADER + 'print("a")\nx = 1\nprint(x)\nimport pytest\n')
@@ -414,6 +425,9 @@ def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caps
     monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
     monkeypatch.setattr(sys, 'path', list(sys.path))
     monkeypatch.delitem(sys.modules, 'pytest')
+    monkeypatch.setattr(runner.Guard, 'allowed', set())
+    monkeypatch.setattr(runner.Guard, 'providers', {})
+    monkeypatch.setattr(runner.Guard, 'hidden', {})
     assert runner.main() == 1
     assert json.loads(output.read_text()) == [
         {'line': 6, 'stdout': 'a\n'},
@@ -427,13 +441,17 @@ def test_runner_exit_codes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     script = tmp_path / 's.py'
     output = tmp_path / 'out.json'
     monkeypatch.setattr(sys, 'path', list(sys.path))
-    for source, code in [('import sys\nsys.exit(0)\n', 0), ('import sys\nsys.exit(3)\n', 1)]:
+    for source, code in [
+        ('import sys\nsys.exit(0)\n', 0),
+        ('import sys\nsys.exit(3)\n', 1),
+        ('import sys\nsys.stdout.buffer.flush()\nassert sys.stdout.encoding\n', 0),
+    ]:
         script.write_text(source)
         monkeypatch.setattr(sys, 'argv', ['runner', str(script), str(output)])
         assert runner.main() == code
 
 
-def test_closure_and_metadata():
+def test_closure_and_metadata(monkeypatch: pytest.MonkeyPatch):
     assert runner.declared_dependencies('print(1)\n') is None
     assert runner.declared_dependencies(HEADER) == ['packaging']
     assert runner.closure(['packaging', 'not-installed-at-all']) == {
@@ -441,4 +459,7 @@ def test_closure_and_metadata():
         'not-installed-at-all',
     }
     assert 'iniconfig' in runner.closure(['pytest'])
+    monkeypatch.setattr(runner.Guard, 'hidden', {'q': 'q-dist'})
     assert runner.hidden_import(ValueError()) is None
+    assert runner.hidden_import(ValueError('pip install q-dist')) == "'q' from q-dist"
+    assert runner.hidden_import(ModuleNotFoundError(name='q.sub')) == "'q' from q-dist"

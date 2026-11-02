@@ -179,9 +179,9 @@ jobs:
         FORMAT: ${{ matrix.format }}
         HTML: docs-artifact/${{ inputs.html-path }}
         EXCLUDE: ${{ inputs.exclude }}
-      # shellcheck disable=SC2086 # EXCLUDE is a list of words
+      # shellcheck disable=SC2086 # EXCLUDE is a list of words, kept unexpanded by set -f
       run: >-
-        python -m sphinx_examples_as_code.audit run "$HTML/_downloads" --html "$HTML"
+        set -f; python -m sphinx_examples_as_code.audit run "$HTML/_downloads" --html "$HTML"
         --format "$FORMAT" --output "results-${FORMAT}.jsonl" --exclude $EXCLUDE
 
     - name: Find download links missing a format
@@ -220,10 +220,11 @@ jobs:
       id: report
       env:
         ALLOW: ${{ inputs.allow }}
+        SEAC: git+https://github.com/pyvista/sphinx-examples-as-code@${{ github.job_workflow_sha }}
       run: |
         shopt -s nullglob
         # shellcheck disable=SC2086 # ALLOW is a list of words
-        uvx --from sphinx-examples-as-code sphinx-examples-as-code-audit report results/*.jsonl \
+        uvx --from "$SEAC" sphinx-examples-as-code-audit report results/*.jsonl \
           --output report.md --allow $ALLOW
         cat report.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -259,6 +260,11 @@ jobs:
       if: steps.report.outputs.failures != '0' || needs.audit.result != 'success'
       env:
         FAILURES: ${{ steps.report.outputs.failures }}
+        AUDIT_RESULT: ${{ needs.audit.result }}
       run: |
-        echo "::error::${FAILURES} findings; see the job summary"
+        if [ "$AUDIT_RESULT" != "success" ]; then
+          echo "::error::An audit job ended with ${AUDIT_RESULT}, so the results are incomplete (${FAILURES} findings so far); see the job summary"
+        else
+          echo "::error::${FAILURES} findings; see the job summary"
+        fi
         exit 1
