@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 
 from docutils import nodes
 from docutils.core import publish_doctree
+from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement
 from packaging.specifiers import InvalidSpecifier
 from packaging.specifiers import SpecifierSet
@@ -32,6 +33,7 @@ from packaging.version import Version
 from sphinx import addnodes
 from sphinx.errors import ConfigError
 from sphinx.util import logging
+from sphinx.util.docutils import SphinxDirective
 
 from ._version import __version__
 
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
 
     from sphinx.application import Sphinx
     from sphinx.config import Config
+    from sphinx.environment import BuildEnvironment
 
 # Node types marking the start of another section - bound the end of an
 # Examples span. Includes desc/index -- numpydoc renders a class's members
@@ -1360,10 +1363,13 @@ def _build_download_entries(
     if script_metadata is not None:
         implied = {_FMT_MARIMO: ['marimo']}
         extra = script_metadata['dependencies']
+        page = script_metadata.get('page_dependencies', [])
         project = _documented_project(script_metadata['project'])
         pins = {project.name: project.pin} if project and project.pin else {}
         deps = {
-            fmt: _script_dependencies(source, [*implied.get(fmt, []), *extra.get(fmt, [])], pins)
+            fmt: _script_dependencies(
+                source, [*implied.get(fmt, []), *extra.get(fmt, []), *page], pins
+            )
             for fmt in formats
         }
 
@@ -1604,6 +1610,7 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
             'dependencies': conf['dependencies'],
             'requires_python': conf['requires_python'],
             'project': app.config.project,
+            'page_dependencies': _page_dependencies(app.env).get(docname, []),
         }
         if conf['script_metadata']
         else None
@@ -1846,8 +1853,48 @@ def _disable_gallery_notebooks(_app: Sphinx, config: Config) -> None:
     config.sphinx_gallery_conf = {**gallery_conf, **overrides}
 
 
+def _page_dependencies(env: BuildEnvironment) -> dict[str, list[str]]:
+    """Return the requirements each page added with ``examples-as-code-dependencies``."""
+    return vars(env).setdefault('_examples_as_code_dependencies', {})
+
+
+class _DependenciesDirective(SphinxDirective):
+    """Add requirements to every download from this page; renders nothing."""
+
+    required_arguments = 1
+    final_argument_whitespace = True
+
+    def run(self) -> list[nodes.Node]:
+        """Record the requirements for the current page."""
+        requirements = self.arguments[0].replace(',', ' ').split()
+        for requirement in requirements:
+            try:
+                Requirement(requirement)
+            except InvalidRequirement as exc:
+                msg = f'Invalid requirement {requirement!r}: {exc}'
+                raise self.error(msg) from None
+        _page_dependencies(self.env).setdefault(self.env.docname, []).extend(requirements)
+        return []
+
+
+def _purge_page_dependencies(_app: Sphinx, env: BuildEnvironment, docname: str) -> None:
+    """Forget a page's requirements before it is read again."""
+    _page_dependencies(env).pop(docname, None)
+
+
+def _merge_page_dependencies(
+    _app: Sphinx, env: BuildEnvironment, docnames: set[str], other: BuildEnvironment
+) -> None:
+    """Copy the requirements a parallel reader recorded into the main environment."""
+    theirs = _page_dependencies(other)
+    _page_dependencies(env).update((name, theirs[name]) for name in docnames if name in theirs)
+
+
 def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     """Register the extension."""
+    app.add_directive('examples-as-code-dependencies', _DependenciesDirective)
+    app.connect('env-purge-doc', _purge_page_dependencies)
+    app.connect('env-merge-info', _merge_page_dependencies)
     app.connect('doctree-resolved', _process_doctree)
     app.connect('config-inited', _finalize_conf)
     # sphinx-gallery fills its own defaults at priority 10.

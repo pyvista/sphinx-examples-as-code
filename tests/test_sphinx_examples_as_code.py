@@ -3319,3 +3319,14 @@ def test_drop_covered_keeps_pinned_platform_specific_and_cycles(fake_requires):
 def test_drop_covered_without_metadata_keeps_everything(fake_requires):
     fake_requires({})
     assert seac._drop_covered(['numpy', 'pyvista']) == ['numpy', 'pyvista']
+
+
+def test_page_dependencies_purge_and_merge():
+    env, other = SimpleNamespace(), SimpleNamespace()
+    seac._page_dependencies(env)['a'] = ['sympy']
+    seac._page_dependencies(other).update({'b': ['tqdm'], 'c': ['rich']})
+    seac._merge_page_dependencies(None, env, {'b'}, other)
+    assert seac._page_dependencies(env) == {'a': ['sympy'], 'b': ['tqdm']}
+    seac._purge_page_dependencies(None, env, 'a')
+    seac._purge_page_dependencies(None, env, 'missing')
+    assert seac._page_dependencies(env) == {'b': ['tqdm']}
