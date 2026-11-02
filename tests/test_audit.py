@@ -274,6 +274,18 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             'compared': 3,
             'findings': [{'kind': 'mismatch', 'message': 'a -> 1', 'statement': 'a\n'}],
         },
+        {
+            'file': 'c/z.py',
+            'name': 'z',
+            'format': 'python',
+            'findings': [{'kind': 'dependency', 'message': "'q' from q"}],
+        },
+        {
+            'file': 'c/z_marimo.py',
+            'name': 'z',
+            'format': 'marimo',
+            'findings': [{'kind': 'error', 'message': 'ModuleNotFoundError: q'}],
+        },
     ]
     jsonl = tmp_path / 'results.jsonl'
     jsonl.write_text(''.join(json.dumps(r) + '\n' for r in results))
@@ -285,16 +297,16 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert '| jupyter | 2 | 2 | 3 |' in text
     assert 'Fails as a notebook while the plain Python script runs (1)\n\n| Download' in text
     assert "`KeyError: \\| 'y'`" in text
-    assert 'Fails as a plain Python script (2)' in text
+    assert 'Fails as a plain Python script (3)' in text
     assert '...and 1 more.' in text
     assert '<details>' in text
     assert f'`{"y" * 197}...`' in text
     table = '| Download | Format | Detail |\n| --- | --- | --- |\n'
     assert f"while the script's match (1)\n\n{table}| `y.ipynb` | jupyter | `b -> 1` |" in text
     assert 'in the script too (2)' in text
-    assert github_output.read_text() == 'failures=3\n'
+    assert github_output.read_text() == 'failures=4\n'
 
-    allow = ['error', 'collapsed', 'mismatch', 'python-mismatch', 'python-error']
+    allow = ['error', 'collapsed', 'mismatch', 'dependency', 'python-mismatch', 'python-error']
     audit.main(['report', str(jsonl), '--output', str(report), '--allow', *allow])
     assert report.read_text().endswith('No failures.\n')
 
@@ -353,8 +365,8 @@ def test_expectations_skip_blocks_before_any_link(tmp_path: Path):
 
 
 def test_marimo_renames_still_match():
-    expected = [audit.Expected('mesh\n', 'm\n')]
-    units = [(audit.statements('mesh_1 = f()\n_mesh_1'), 'm\n')]
+    expected = [audit.Expected('mesh\n', '1\n'), audit.Expected('mesh_2\n', 'Mesh()\n')]
+    units = [(audit.statements('mesh_1 = f()\n_mesh_1'), '1\n'), (audit.statements('mesh_2'), '')]
     assert audit.compare(expected, units, 'marimo') == ([], 1)
 
 

@@ -52,6 +52,8 @@ MARIMO_NAME = re.compile(r'^_?(.+?)(?:_\d+)?$')
 MIME_LEAF = re.compile(r'^((?:text|application|image)/[\w.+-]+):(.*)$', re.DOTALL)
 NUMPY_SCALAR = re.compile(r'\bnp\.\w+\(([^()]*)\)')
 PRIVATE_NAME_ERROR = re.compile(r"NameError: name '_\w+' is not defined")
+# Script findings that mean the script itself does not run.
+SCRIPT_FAILURES = ('error', 'dependency', 'timeout')
 CHECK_FLAGS = doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE
 # Finding kinds, in report order, with their headings.
 KINDS = {
@@ -211,6 +213,15 @@ def same_output(want: str, got: str) -> bool:
         return False
 
 
+def is_literal(text: str) -> bool:
+    """Check whether a doctest's output is a Python literal, the only kind marimo shows as is."""
+    try:
+        ast.literal_eval(NUMPY_SCALAR.sub(r'\1', text.strip()))
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return False
+    return True
+
+
 def output_text(outputs: list[dict]) -> str | None:
     """Return the stdout and displayed values of a notebook cell, or None if one is not text."""
     parts = []
@@ -300,7 +311,7 @@ def compare(
             continue
         else:
             got = units[u][1]
-        if got is None:
+        if got is None or (fmt == 'marimo' and not is_literal(ex.want)):
             continue
         compared += 1
         if not same_output(ex.want, got):
@@ -508,7 +519,7 @@ def report(args: argparse.Namespace) -> None:
         if line.strip()
     ]
     script_findings = {
-        (r['name'], f['kind'], f.get('statement'))
+        (r['name'], 'error' if f['kind'] in SCRIPT_FAILURES else f['kind'], f.get('statement'))
         for r in results
         if r['format'] == 'python'
         for f in r['findings']
