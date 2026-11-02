@@ -353,21 +353,57 @@ def _join_segments(segments: list[Segment]) -> list[str]:
     return lines
 
 
-def _convert_doctest_block(node: nodes.doctest_block) -> list[Segment]:
+def _convert_doctest_block(
+    node: nodes.doctest_block, *, print_output: bool = False
+) -> list[Segment]:
     """Convert a doctest block; see ``_convert_doctest_source``."""
-    return _convert_doctest_source(node.astext())
+    return _convert_doctest_source(node.astext(), print_output=print_output)
 
 
-def _convert_doctest_source(source: str) -> list[Segment]:
+def _print_last_expression(lines: list[str]) -> list[str]:
+    """Wrap the last statement in ``print(repr())`` if it is an expression other than a print."""
+    source = '\n'.join(lines)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return lines
+    last = tree.body[-1] if tree.body else None
+    if not isinstance(last, ast.Expr):
+        return lines
+    value = last.value
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == 'print'
+    ):
+        return lines
+    opening, closing = b'print(repr(', b'))'
+    if isinstance(value, ast.Tuple):
+        # An unparenthesized tuple would otherwise become several repr arguments.
+        args = ast.parse(f'repr({ast.get_source_segment(source, last)})').body[0].value.args
+        if not (len(args) == 1 and isinstance(args[0], ast.Tuple)):
+            opening, closing = b'print(repr((', b')))'
+    # ast column offsets count UTF-8 bytes.
+    encoded = [line.encode() for line in lines]
+    end_row, end_col = last.end_lineno - 1, last.end_col_offset
+    encoded[end_row] = encoded[end_row][:end_col] + closing + encoded[end_row][end_col:]
+    row, col = last.lineno - 1, last.col_offset
+    encoded[row] = encoded[row][:col] + opening + encoded[row][col:]
+    return [line.decode() for line in encoded]
+
+
+def _convert_doctest_source(source: str, *, print_output: bool = False) -> list[Segment]:
     """Convert doctest text, stripping ``>>> ``/``... `` prompts.
 
     Non-prompted, non-blank lines are doctest *output* -- dropped entirely,
-    not kept as comments. A statement with output is followed by a ``break``
+    not kept as comments. With ``print_output``, an expression with output is
+    wrapped in ``print(repr())``. A statement with output is followed by a ``break``
     segment, or by ``end`` if it is the last.
     """
     segments: list[Segment] = []
     lines: list[str] = []
     has_output = False
+    statement_start = 0
     for line in source.splitlines():
         if line.startswith('>>> ') or line == '>>>':
             if has_output and lines:
@@ -377,6 +413,7 @@ def _convert_doctest_source(source: str) -> list[Segment]:
                 segments += [('code', lines), ('break', blanks)]
                 lines = []
             has_output = False
+            statement_start = len(lines)
             lines.append(_clean_code_comment(line[4:]))
         elif line.startswith('... ') or line == '...':
             lines.append(_clean_code_comment(line[4:]))
@@ -384,6 +421,8 @@ def _convert_doctest_source(source: str) -> list[Segment]:
             lines.append('')
         else:
             # doctest output line - dropped
+            if print_output and not has_output:
+                lines[statement_start:] = _print_last_expression(lines[statement_start:])
             has_output = True
     while lines and not lines[-1].strip():
         lines.pop()
@@ -413,7 +452,7 @@ def _gallery_code_block_source(node: nodes.Element) -> str:
     )
 
 
-def _convert_literal_block(node: nodes.Element) -> list[Segment]:
+def _convert_literal_block(node: nodes.Element, *, print_output: bool = False) -> list[Segment]:
     """Convert a ``.. code-block::``. Python blocks stay code, others become comments."""
     if _is_gallery_code_block(node):
         language, source = node.get('lang', ''), _gallery_code_block_source(node)
@@ -422,7 +461,7 @@ def _convert_literal_block(node: nodes.Element) -> list[Segment]:
     # Case-insensitive: sphinx-gallery emits ``.. code-block:: Python`` (capitalized).
     if language.lower() in _PYTHON_LANGUAGES:
         if source.lstrip().startswith('>>>'):
-            return _convert_doctest_source(source)
+            return _convert_doctest_source(source, print_output=print_output)
         lines = [_clean_code_comment(line) for line in source.splitlines()]
         while lines and not lines[-1].strip():
             lines.pop()
@@ -703,9 +742,9 @@ def _convert_node(node: nodes.Node, ctx: _RenderContext) -> list[Segment]:
     if isinstance(node, _IGNORED_TYPES):
         return []
     if isinstance(node, nodes.doctest_block):
-        return _convert_doctest_block(node)
+        return _convert_doctest_block(node, print_output=ctx.fmt == _FMT_PYTHON)
     if isinstance(node, nodes.literal_block) or _is_gallery_code_block(node):
-        return _convert_literal_block(node)
+        return _convert_literal_block(node, print_output=ctx.fmt == _FMT_PYTHON)
     if type(node) in _ADMONITION_LABELS:
         if _is_see_also_type(node):
             # "See Also" content is always dropped -- see _build_segments
