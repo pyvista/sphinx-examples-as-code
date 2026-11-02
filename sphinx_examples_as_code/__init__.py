@@ -1288,7 +1288,7 @@ def _newest_python_minor(name: str) -> int | None:
 
 
 @functools.cache
-def _ships_compiled_wheel(name: str) -> bool:
+def _ships_version_specific_wheel(name: str) -> bool:
     """Check whether an installed distribution's wheel is built for one Python version's ABI."""
     try:
         wheel = importlib.metadata.distribution(name).read_text('WHEEL') or ''
@@ -1301,9 +1301,11 @@ def _ships_compiled_wheel(name: str) -> bool:
 
 
 def _python_upper_bound(deps: list[str], project: str | None = None) -> str | None:
-    """Return ``<3.N`` just above the newest Python ``project`` and every compiled dep name."""
+    """Return ``<3.N`` just above the newest Python ``project`` and each version-specific dep."""
     names = [_canonical_name(dep) for dep in deps]
-    newest = [_newest_python_minor(n) for n in names if n == project or _ships_compiled_wheel(n)]
+    newest = [
+        _newest_python_minor(n) for n in names if n == project or _ships_version_specific_wheel(n)
+    ]
     known = [minor for minor in newest if minor is not None]
     return f'<3.{min(known) + 1}' if known else None
 

@@ -3117,7 +3117,9 @@ def fake_classifiers(monkeypatch: pytest.MonkeyPatch):
 
         monkeypatch.setattr(seac.importlib.metadata, 'metadata', metadata)
         monkeypatch.setattr(
-            seac, '_ships_compiled_wheel', lambda name: name in classifiers and name not in pure
+            seac,
+            '_ships_version_specific_wheel',
+            lambda name: name in classifiers and name not in pure,
         )
 
     seac._newest_python_minor.cache_clear()
@@ -3158,11 +3160,11 @@ def test_python_upper_bound_skips_pure_dependencies_except_project(fake_classifi
     assert seac._python_upper_bound(deps, project='pyvista') == '<3.15'
 
 
-def test_ships_compiled_wheel():
-    seac._ships_compiled_wheel.cache_clear()
-    assert seac._ships_compiled_wheel('numpy')
-    assert not seac._ships_compiled_wheel('docutils')
-    assert not seac._ships_compiled_wheel('not-an-installed-project')
+def test_ships_version_specific_wheel():
+    seac._ships_version_specific_wheel.cache_clear()
+    assert seac._ships_version_specific_wheel('numpy')
+    assert not seac._ships_version_specific_wheel('docutils')
+    assert not seac._ships_version_specific_wheel('not-an-installed-project')
 
 
 @pytest.mark.parametrize(
@@ -3174,16 +3176,16 @@ def test_ships_compiled_wheel():
         (['py3-none-any'], False),
     ],
 )
-def test_ships_compiled_wheel_reads_abi_tag(
+def test_ships_version_specific_wheel_reads_abi_tag(
     monkeypatch: pytest.MonkeyPatch, tags: list[str], expected: bool
 ):
     wheel = ''.join(f'Tag: {tag}\n' for tag in tags)
     monkeypatch.setattr(
         seac.importlib.metadata, 'distribution', lambda _name: Mock(read_text=lambda _f: wheel)
     )
-    seac._ships_compiled_wheel.cache_clear()
-    assert seac._ships_compiled_wheel('dist') is expected
-    seac._ships_compiled_wheel.cache_clear()
+    seac._ships_version_specific_wheel.cache_clear()
+    assert seac._ships_version_specific_wheel('dist') is expected
+    seac._ships_version_specific_wheel.cache_clear()
 
 
 @pytest.mark.parametrize(

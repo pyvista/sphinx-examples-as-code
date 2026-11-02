@@ -144,10 +144,9 @@ Unless `requires_python` is set, the block's `requires-python` combines:
 - `<3.N`, one minor version above the newest Python named in the `Programming Language ::
   Python :: 3.X` classifiers of that project and of every dependency, listed or left out,
   installed from a wheel built for one Python version's ABI, e.g. `cp314-cp314`, as installed
-  in the environment building the docs. Dependencies whose wheels have no ABI or the stable
-  `abi3` one, and dependencies without such classifiers, don't count, and
-  the bound is dropped when it would exclude every Python the project's own
-  `Requires-Python` allows.
+  in the environment building the docs. Dependencies whose wheels carry the `none` or stable
+  `abi3` ABI tag, and dependencies without such classifiers, don't count, and the bound is
+  dropped when it would exclude every Python the project's own `Requires-Python` allows.
 
 With neither, the line is left out.
 
@@ -277,7 +276,7 @@ With `--html`, only downloads a page links to are run. Each finding has a kind:
 | `magic` | A line the marimo converter turned into an IPython magic |
 | `marimo-check` | `marimo check` fails, e.g. a name defined in two cells |
 | `dependency` | A script fails importing a module its `dependencies` do not install |
-| `python-version` | A download's `requires-python` excludes the Python running the audit |
+| `requires-python` | A download's `requires-python` excludes the Python running the audit |
 | `collapsed` | A doctest value is not the last statement of its notebook cell, so it is not shown |
 | `dropped-output` | A script does not print a doctest value |
 | `mismatch` | A notebook shows a value that differs from the doctest's expected output while the script's matches |
