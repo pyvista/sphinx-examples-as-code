@@ -14,6 +14,10 @@ on:
           commit that built the docs; the audit itself is then installed from this workflow's commit.
         required: true
         type: string
+      repository:
+        description: The `owner/repo` that builds the docs; empty for the calling repository.
+        type: string
+        default: ''
       run-id:
         description: Run that uploaded the artifact; empty to use the newest successful `docs-workflow` run on the default branch that still has it.
         type: string
@@ -88,12 +92,12 @@ jobs:
       id: find
       env:
         GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
+        GH_REPO: ${{ inputs.repository || github.repository }}
         RUN_ID: ${{ inputs.run-id }}
         WORKFLOW: ${{ inputs.docs-workflow }}
         ARTIFACT: ${{ inputs.artifact }}
-        BRANCH: ${{ github.event.repository.default_branch }}
       run: |
+        BRANCH=$(gh api "repos/${GH_REPO}" --jq .default_branch)
         if [ -n "$RUN_ID" ]; then
           runs=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}" --jq '[.id, .head_sha] | @tsv')
         else
@@ -131,6 +135,7 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       with:
+        repository: ${{ inputs.repository || github.repository }}
         ref: ${{ needs.find-build.outputs.sha }}  # install the dependencies that built the docs
         persist-credentials: false
 
@@ -177,6 +182,7 @@ jobs:
         name: ${{ inputs.artifact }}
         path: docs-artifact
         run-id: ${{ needs.find-build.outputs.run-id }}
+        repository: ${{ inputs.repository || github.repository }}
         github-token: ${{ github.token }}
 
     - name: Run the ${{ matrix.format }} downloads
@@ -235,17 +241,21 @@ jobs:
 
     - name: File the report as an issue
       if: >-
-        inputs.issue-label != '' && github.ref_name == github.event.repository.default_branch &&
+        inputs.issue-label != '' &&
         (steps.report.outputs.failures != '0' || needs.audit.result != 'success')
       env:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
         LABEL: ${{ inputs.issue-label }}
         AUDIT_RESULT: ${{ needs.audit.result }}
-        DOCS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ needs.find-build.outputs.run-id }}
+        DOCS_RUN_URL: ${{ github.server_url }}/${{ inputs.repository || github.repository }}/actions/runs/${{ needs.find-build.outputs.run-id }}
         DOCS_SHA: ${{ needs.find-build.outputs.sha }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
+        if [ "$GITHUB_REF_NAME" != "$(gh api "repos/${GH_REPO}" --jq .default_branch)" ]; then
+          echo "Not filed: the run is not on the default branch"
+          exit 0
+        fi
         gh label create "$LABEL" --color cbb230 --description "Example downloads in the docs that fail" --force || true
         note=""
         if [ "$AUDIT_RESULT" != "success" ]; then
