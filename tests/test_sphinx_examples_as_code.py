@@ -352,6 +352,13 @@ def test_convert_doctest_block_trailing_blank_trimmed():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize('language', ['python', 'py'])
+def test_convert_literal_block_python_doctest_style(language: str):
+    node = nodes.literal_block('', '>>> import math\n>>> math.floor(8.5)\n8')
+    node['language'] = language
+    assert seac._convert_literal_block(node) == [('code', ['import math', 'math.floor(8.5)'])]
+
+
 def test_convert_literal_block_python():
     # Sphinx's own code-block directive sets a ``language`` attribute
     # (unlike plain docutils', which uses CSS classes instead), so this
