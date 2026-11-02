@@ -1378,7 +1378,11 @@ def _build_download_entries(
         cap = _python_upper_bound(deps[fmt], project.name if project else None)
         return _python_range(floor, cap)
 
-    shown = {fmt: _drop_covered(fmt_deps) for fmt, fmt_deps in deps.items()}
+    # marimo's sandbox adds back any import or marimo itself that its header does not name.
+    shown = {
+        fmt: fmt_deps if fmt == _FMT_MARIMO else _drop_covered(fmt_deps)
+        for fmt, fmt_deps in deps.items()
+    }
 
     def header_for(fmt: str, run_line: str) -> str:
         if not deps:

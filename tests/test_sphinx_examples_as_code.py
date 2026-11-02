@@ -3086,6 +3086,16 @@ def test_script_metadata_marimo(tmp_path: Path):
     assert source.index('mo.md(') < source.index('import marimo as mo')
 
 
+@pytest.mark.parametrize(('fmt', 'listed'), [('jupyter', False), ('marimo', True)])
+def test_script_metadata_drops_covered_except_marimo(
+    tmp_path: Path, fake_requires, fmt: str, listed: bool
+):
+    fake_requires({'ipywidgets': ['numpy'], 'marimo': ['numpy']})
+    _name, source = _write_with_metadata(tmp_path, [fmt])
+    header = source.split('///', 2)[1] if fmt == 'marimo' else json.loads(source)['cells'][0]
+    assert ('numpy' in str(header)) is listed
+
+
 @pytest.mark.parametrize(
     ('codes', 'expected'),
     [
