@@ -305,7 +305,9 @@ With `--html`, only downloads a page links to are run. Each finding has a kind:
   `python-error`, which the documentation build itself covers; pass `--allow` to choose.
 
 The reusable workflow `.github/workflows/audit-downloads.yml` runs this on a docs artifact
-of the calling repository, one job per format, and can file the report as an issue:
+of the calling repository, one job per format, and can file the report as an issue. Each job
+runs `install` in a checkout of the commit that built the docs, then installs the audit from
+the workflow's own commit:
 
 ```yaml
 jobs:
@@ -317,7 +319,7 @@ jobs:
       issues: write
     with:
       artifact: docs-html
-      install: uv pip install . --group docs 'sphinx-examples-as-code[audit]'
+      install: uv pip install . --group docs
       headless-display: true
       issue-label: docs-download-failure
 ```
