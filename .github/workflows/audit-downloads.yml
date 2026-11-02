@@ -1,0 +1,257 @@
+name: Audit downloads
+
+# Reusable: runs every example download of a built HTML artifact and reports the findings.
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: Name of the artifact holding the built HTML.
+        required: true
+        type: string
+      install:
+        description: >-
+          Shell command installing the documentation environment, including
+          `sphinx-examples-as-code[audit]`. Runs in a checkout of the calling repository.
+        required: true
+        type: string
+      run-id:
+        description: Run that uploaded the artifact; empty to use the newest successful `docs-workflow` run on the default branch that still has it.
+        type: string
+        default: ''
+      docs-workflow:
+        description: Workflow file searched for the artifact when `run-id` is empty.
+        type: string
+        default: docs.yml
+      html-path:
+        description: Folder inside the artifact that holds the HTML and `_downloads`.
+        type: string
+        default: .
+      setup:
+        description: Shell command run before `install`, e.g. to fetch data the examples read.
+        type: string
+        default: ''
+      cache-path:
+        description: Path of an Actions cache of the calling repository to restore before `setup`.
+        type: string
+        default: ''
+      cache-key:
+        description: Key of that cache.
+        type: string
+        default: ''
+      formats:
+        description: JSON list of the download formats to run.
+        type: string
+        default: '["python", "jupyter", "marimo"]'
+      python-version:
+        type: string
+        default: '3.14'
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      headless-display:
+        description: Set up a virtual display and OSMesa for VTK rendering.
+        type: boolean
+        default: false
+      timeout-minutes:
+        type: number
+        default: 360
+      allow:
+        description: Space-separated finding kinds that do not fail the audit.
+        type: string
+        default: python-mismatch python-error
+      issue-label:
+        description: Label of an issue to open, or comment on, when the audit fails on the default branch; empty for none.
+        type: string
+        default: ''
+    outputs:
+      failures:
+        description: Number of findings that fail the audit.
+        value: ${{ jobs.report.outputs.failures }}
+
+permissions: {}
+
+jobs:
+  find-build:
+    name: Find the docs build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # to list runs and their artifacts
+    outputs:
+      run-id: ${{ steps.find.outputs.run-id }}
+      sha: ${{ steps.find.outputs.sha }}
+    steps:
+    - name: Find the newest successful run with the artifact
+      id: find
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RUN_ID: ${{ inputs.run-id }}
+        WORKFLOW: ${{ inputs.docs-workflow }}
+        ARTIFACT: ${{ inputs.artifact }}
+        BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        if [ -n "$RUN_ID" ]; then
+          runs=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}" --jq '[.id, .head_sha] | @tsv')
+        else
+          runs=$(gh api "repos/${GH_REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&status=success&per_page=30" \
+            --jq '.workflow_runs[]
+              | select(.event != "pull_request" and .head_repository.full_name == env.GH_REPO)
+              | [.id, .head_sha] | @tsv')
+        fi
+        while IFS=$'\t' read -r id sha; do
+          [ -n "$id" ] || continue
+          found=$(gh api "repos/${GH_REPO}/actions/runs/${id}/artifacts?name=${ARTIFACT}" \
+            --jq '[.artifacts[] | select(.expired | not)] | length')
+          if [ "$found" -gt 0 ]; then
+            echo "Using run ${id} at ${sha}"
+            echo "run-id=${id}" >> "$GITHUB_OUTPUT"
+            echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        done <<< "$runs"
+        echo "::error::no run has an unexpired ${ARTIFACT} artifact"
+        exit 1
+
+  audit:
+    name: Audit ${{ matrix.format }} downloads
+    needs: find-build
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      actions: read # to download the artifact of another run
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        format: ${{ fromJSON(inputs.formats) }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        activate-environment: true
+        enable-cache: false
+
+    - name: Set up headless display
+      if: inputs.headless-display
+      uses: pyvista/setup-headless-display-action@10e6efb97af3cd1523828f0e22c39f0e4567f3e4   # v5.2.0
+      with:
+        pyvista: true
+
+    - name: Restore the cache
+      if: inputs.cache-key != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+      with:
+        path: ${{ inputs.cache-path }}
+        key: ${{ inputs.cache-key }}
+        enableCrossOsArchive: true
+        fail-on-cache-miss: true
+
+    - name: Set up
+      if: inputs.setup != ''
+      env:
+        SETUP: ${{ inputs.setup }}
+      run: bash -euo pipefail -c "$SETUP"
+
+    - name: Install the documentation environment
+      env:
+        INSTALL: ${{ inputs.install }}
+      run: bash -euo pipefail -c "$INSTALL"
+
+    - name: Download the docs build
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
+      with:
+        name: ${{ inputs.artifact }}
+        path: docs-artifact
+        run-id: ${{ needs.find-build.outputs.run-id }}
+        github-token: ${{ github.token }}
+
+    - name: Run the ${{ matrix.format }} downloads
+      env:
+        FORMAT: ${{ matrix.format }}
+        HTML: docs-artifact/${{ inputs.html-path }}
+      run: >-
+        python -m sphinx_examples_as_code.audit run "$HTML/_downloads" --html "$HTML"
+        --format "$FORMAT" --output "results-${FORMAT}.jsonl"
+
+    - name: Find download links missing a format
+      if: strategy.job-index == 0
+      env:
+        HTML: docs-artifact/${{ inputs.html-path }}
+      run: python -m sphinx_examples_as_code.audit pages "$HTML" --output results-pages.jsonl
+
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+      if: ${{ !cancelled() }}
+      with:
+        name: download-audit-${{ matrix.format }}
+        path: results-*.jsonl
+
+  report:
+    name: Report
+    needs: [find-build, audit]
+    if: ${{ !cancelled() && needs.find-build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write # to file the report
+    outputs:
+      failures: ${{ steps.report.outputs.failures }}
+    steps:
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
+      with:
+        pattern: download-audit-*
+        path: results
+        merge-multiple: true
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+      with:
+        enable-cache: false
+
+    - name: Summarize the results
+      id: report
+      env:
+        ALLOW: ${{ inputs.allow }}
+      run: |
+        shopt -s nullglob
+        # shellcheck disable=SC2086 # ALLOW is a list of words
+        uvx --from sphinx-examples-as-code sphinx-examples-as-code-audit report results/*.jsonl \
+          --output report.md --allow $ALLOW
+        cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: File the report as an issue
+      if: >-
+        inputs.issue-label != '' && github.ref_name == github.event.repository.default_branch &&
+        (steps.report.outputs.failures != '0' || needs.audit.result != 'success')
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        LABEL: ${{ inputs.issue-label }}
+        AUDIT_RESULT: ${{ needs.audit.result }}
+        DOCS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ needs.find-build.outputs.run-id }}
+        DOCS_SHA: ${{ needs.find-build.outputs.sha }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        gh label create "$LABEL" --color cbb230 --description "Example downloads in the docs that fail" --force || true
+        note=""
+        if [ "$AUDIT_RESULT" != "success" ]; then
+          note="At least one audit job did not finish (\`${AUDIT_RESULT}\`), so the results are incomplete."
+        fi
+        # Stay under GitHub's 65536 character limit for an issue body.
+        body=$(printf '### Example download audit\n\n**Run:** %s\n**Docs build:** %s at `%s`\n\n%s\n\n%s\n' \
+          "$RUN_URL" "$DOCS_RUN_URL" "${DOCS_SHA:0:8}" "$note" "$(head -c 60000 report.md)")
+        existing=$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')
+        if [ -n "$existing" ]; then
+          gh issue comment "$existing" --body "$body"
+        else
+          gh issue create --title "Example download audit failures" --label "$LABEL" --body "$body"
+        fi
+
+    - name: Fail on findings
+      if: steps.report.outputs.failures != '0' || needs.audit.result != 'success'
+      env:
+        FAILURES: ${{ steps.report.outputs.failures }}
+      run: |
+        echo "::error::${FAILURES} findings; see the job summary"
+        exit 1

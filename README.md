@@ -261,6 +261,65 @@ Two things worth knowing before turning this on:
   `notebook_extensions`, `first_notebook_cell`, `last_notebook_cell` or `notebook_images`
   yourself has no effect and is reported as a warning.
 
+## Auditing the downloads
+
+`sphinx-examples-as-code-audit` runs every download of a built HTML tree in the
+documentation's own environment, with plotting off screen, and reports what is wrong with
+each. The `audit` extra installs what it needs to run notebooks:
+
+```bash
+pip install 'sphinx-examples-as-code[audit]'
+sphinx-examples-as-code-audit run _build/html/_downloads --html _build/html --format python --output python.jsonl
+sphinx-examples-as-code-audit run _build/html/_downloads --html _build/html --format jupyter --output jupyter.jsonl
+sphinx-examples-as-code-audit run _build/html/_downloads --html _build/html --format marimo --output marimo.jsonl
+sphinx-examples-as-code-audit pages _build/html --output pages.jsonl
+sphinx-examples-as-code-audit report *.jsonl --output report.md
+```
+
+With `--html`, only downloads a page links to are run. Each finding has a kind:
+
+| Kind | Finding |
+| --- | --- |
+| `syntax` | Code that is not valid Python, such as a doctest prompt or a `%` line |
+| `magic` | A line the marimo converter turned into an IPython magic |
+| `marimo-check` | `marimo check` fails, e.g. a name defined in two cells |
+| `dependency` | A script fails importing a module its `dependencies` do not install |
+| `collapsed` | A doctest value is not the last statement of its notebook cell, so it is not shown |
+| `dropped-output` | A script does not print a doctest value |
+| `mismatch` | A notebook shows a value that differs from the doctest's expected output while the script's matches |
+| `python-mismatch` | The script's value differs too |
+| `marimo-rename` | marimo renamed a name to a private `_name` and the cell raises `NameError` |
+| `error` | A notebook fails while the script of the same example runs |
+| `python-error` | The script fails too |
+| `timeout` | A download runs longer than `--timeout` seconds |
+| `missing-download` | A link group or gallery page lacks a format other pages have |
+
+- Scripts run one top-level statement at a time. An import of a module that only
+  distributions outside the `dependencies` of the script's inline metadata provide fails,
+  as it would in the environment `uv run` builds.
+- Expected outputs come from the doctest blocks after each download link, compared with
+  `ELLIPSIS`, `NORMALIZE_WHITESPACE` and pytest's `NUMBER`.
+- `report` lists findings by kind and fails on all of them but `python-mismatch` and
+  `python-error`, which the documentation build itself covers; pass `--allow` to choose.
+
+The reusable workflow `.github/workflows/audit-downloads.yml` runs this on a docs artifact
+of the calling repository, one job per format, and can file the report as an issue:
+
+```yaml
+jobs:
+  audit:
+    uses: pyvista/sphinx-examples-as-code/.github/workflows/audit-downloads.yml@v0.12.0
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    with:
+      artifact: docs-html
+      install: uv pip install . --group docs 'sphinx-examples-as-code[audit]'
+      headless-display: true
+      issue-label: docs-download-failure
+```
+
 ## Development
 
 ```bash
