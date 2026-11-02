@@ -334,3 +334,52 @@ def test_gallery_downloads_enabled_warns_about_notebook_settings(tmp_path: Path)
     assert "sphinx_gallery_conf key(s) 'pypandoc', 'first_notebook_cell' have no effect" in err
     assert "'pypandoc' not available" not in err
     assert not list((src_dir / 'auto_examples').rglob('*.ipynb'))
+
+
+def _build_with_dependencies(tmp_path: Path, requirements: str) -> tuple[int, str, str, Path]:
+    """Build the fixture with an ``examples-as-code-dependencies`` directive in its example."""
+    src_dir = tmp_path / 'src'
+    shutil.copytree(FIXTURE_DIR, src_dir)
+    example = src_dir / 'examples' / 'plot_minimal.py'
+    source = example.read_text(encoding='utf-8')
+    marker = '==========================\n'
+    directive = f'{marker}\n.. examples-as-code-dependencies:: {requirements}\n'
+    example.write_text(source.replace(marker, directive, 1), encoding='utf-8')
+    html_dir = tmp_path / 'html'
+    sphinx_args = (
+        '-D',
+        'sphinx_examples_as_code_conf.gallery_downloads=1',
+        '-D',
+        'sphinx_examples_as_code_conf.script_metadata=1',
+        '-D',
+        'sphinx_examples_as_code_conf.formats=python,jupyter,marimo',
+    )
+    returncode, out, err = _run_sphinx_build(
+        _sphinx_build_cmd(src_dir, html_dir, tmp_path / 'doctrees', sphinx_args)
+    )
+    return returncode, out, err, html_dir
+
+
+def test_dependencies_directive_adds_to_every_download(tmp_path: Path):
+    """``examples-as-code-dependencies`` lists its requirements in each download's header."""
+    returncode, out, err, html_dir = _build_with_dependencies(tmp_path, 'sympy tqdm>=4')
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    downloads = [
+        path
+        for path in (html_dir / '_downloads').rglob('plot_minimal*')
+        if path.suffix == '.ipynb'
+        or (path.suffix == '.py' and path.read_text(encoding='utf-8').startswith('# /// script'))
+    ]
+    assert sorted(path.suffix for path in downloads) == ['.ipynb', '.py', '.py']
+    for path in downloads:
+        text = path.read_text(encoding='utf-8')
+        assert 'sympy' in text
+        assert 'tqdm>=4' in text
+        assert 'examples-as-code-dependencies' not in text
+    html = (html_dir / 'auto_examples' / 'plot_minimal.html').read_text(encoding='utf-8')
+    assert 'examples-as-code-dependencies' not in html
+
+
+def test_dependencies_directive_rejects_invalid_requirement(tmp_path: Path):
+    _returncode, _out, err, _html_dir = _build_with_dependencies(tmp_path, 'not!valid')
+    assert "Invalid requirement 'not!valid'" in err
