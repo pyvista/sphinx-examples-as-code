@@ -3096,6 +3096,21 @@ def test_script_metadata_drops_covered_except_marimo(
     assert ('numpy' in str(header)) is listed
 
 
+def test_write_marimo_notebook_keeps_percent_lines(tmp_path: Path):
+    code = ['art = """\n', '% %\n', '%%  %\n', '"""\n', 'x = 5 % 3']
+    notebook = {
+        'cells': [{'cell_type': 'code', 'metadata': {}, 'source': code}],
+        'metadata': {},
+        'nbformat': 4,
+        'nbformat_minor': 5,
+    }
+    rel_path = seac._write_marimo_notebook(Mock(outdir=str(tmp_path)), 'art', notebook)
+    source = (tmp_path / '_downloads' / rel_path).read_text(encoding='utf-8')
+    assert 'magic command' not in source
+    assert seac._PERCENT_MARK not in source
+    assert '    art = """\n    % %\n    %%  %\n    """\n    x = 5 % 3\n' in source
+
+
 @pytest.mark.parametrize(
     ('codes', 'expected'),
     [
