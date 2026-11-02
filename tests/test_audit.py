@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import html
+import importlib.metadata
 import importlib.util
 import json
 from pathlib import Path
@@ -160,7 +161,7 @@ def test_run_python(site: Path, tmp_path: Path):
     results = _run(site, 'python', tmp_path)
     assert _kinds(results['c/prompt.py']) == ['error', 'syntax']
     assert _kinds(results['d/undeclared.py']) == ['dependency']
-    assert "'pytest' from pytest" in results['d/undeclared.py']['findings'][0]['message']
+    assert results['d/undeclared.py']['findings'][0]['message'] == "'pytest' from pytest"
     assert results['d/probe.py']['findings'] == []
     assert _kinds(results['d/hint.py']) == ['dependency']
     assert _kinds(results['d/fails.py']) == ['error']
@@ -319,6 +320,34 @@ def test_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert github_output.read_text() == 'failures=4\n'
 
 
+def test_report_matches_scripts_within_a_link_group(tmp_path: Path):
+    error = [{'kind': 'error', 'message': 'ValueError: x'}]
+    results = [
+        {'file': 'a/x.py', 'name': 'x', 'format': 'python', 'group': 'a.html#0', 'findings': error},
+        {
+            'file': 'a/x.ipynb',
+            'name': 'x',
+            'format': 'jupyter',
+            'group': 'a.html#0',
+            'findings': error,
+        },
+        {
+            'file': 'b/x.ipynb',
+            'name': 'x',
+            'format': 'jupyter',
+            'group': 'b.html#0',
+            'findings': error,
+        },
+    ]
+    jsonl = tmp_path / 'results.jsonl'
+    jsonl.write_text(''.join(json.dumps(r) + '\n' for r in results))
+    report = tmp_path / 'report.md'
+    audit.main(['report', str(jsonl), '--output', str(report)])
+    text = report.read_text()
+    assert 'Fails as a notebook while the plain Python script runs (1)' in text
+    assert 'Fails as a plain Python script (2)' in text
+
+
 def test_run_progress(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     for i in range(100):
         (tmp_path / f'e{i}.py').write_text('')
@@ -405,7 +434,25 @@ def test_expectations_skip_blocks_before_any_link(tmp_path: Path):
     page = '<div class="highlight-pycon"><div class="highlight"><pre>&gt;&gt;&gt; 1\n1\n</pre>'
     page += _page({'a/x.py': '>>> import os\n>>> 2\n2\n'})
     (tmp_path / 'p.html').write_text(page)
-    assert audit.expectations(tmp_path) == {'a/x.py': [audit.Expected('2\n', '2\n')]}
+    assert audit.expectations(tmp_path) == {'a/x.py': ('p.html#0', [audit.Expected('2\n', '2\n')])}
+
+
+def test_page_groups_bottom_links():
+    block = '<div class="highlight-pycon"><div class="highlight"><pre>&gt;&gt;&gt; {0}\n{0}\n</pre>'
+    link = '<p><a class="reference download internal" href="../_downloads/{0}">x</a></p>'
+    text = block.format(1) + link.format('a.py') + block.format(2) + link.format('b.py')
+    assert audit.page_groups(text, 'bottom') == [
+        (['a.py'], ['>>> 1\n1\n']),
+        (['b.py'], ['>>> 2\n2\n']),
+    ]
+    assert audit.page_groups(text) == [(['a.py'], ['>>> 2\n2\n']), (['b.py'], [])]
+
+
+def test_run_without_downloads(tmp_path: Path):
+    output = tmp_path / 'r.jsonl'
+    audit.main(['run', str(tmp_path), '--format', 'marimo', '--output', str(output)])
+    [record] = [json.loads(line) for line in output.read_text().splitlines()]
+    assert record['findings'] == [{'kind': 'no-downloads', 'message': 'no marimo downloads'}]
 
 
 def test_marimo_renames_still_match():
@@ -474,6 +521,19 @@ def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caps
     assert f"{runner.BLOCKED} of 'pytest' from pytest" in capsys.readouterr().err
 
 
+def test_runner_records_writelines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    script = tmp_path / 's.py'
+    script.write_text('import sys\nsys.stdout.writelines(["w\\n"])\n')
+    output = tmp_path / 'out.json'
+    monkeypatch.setattr(sys, 'argv', ['runner', str(script), str(output)])
+    monkeypatch.setattr(sys, 'path', list(sys.path))
+    assert runner.main() == 0
+    assert json.loads(output.read_text()) == [
+        {'line': 1, 'stdout': ''},
+        {'line': 2, 'stdout': 'w\n'},
+    ]
+
+
 def test_runner_exit_codes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     script = tmp_path / 's.py'
     output = tmp_path / 'out.json'
@@ -501,9 +561,17 @@ def test_closure_and_metadata(monkeypatch: pytest.MonkeyPatch):
     assert 'iniconfig' in runner.closure(['pytest'])
     monkeypatch.setattr(runner.Guard, 'hidden', {'q': 'q-dist'})
     assert runner.hidden_import(ValueError()) is None
-    assert runner.hidden_import(ValueError('pip install q-dist')) == "'q' from q-dist"
+    assert runner.hidden_import(ImportError('pip install q-dist')) == "'q' from q-dist"
+    assert runner.hidden_import(ValueError('pip install q-dist')) is None
     assert runner.hidden_import(ModuleNotFoundError(name='q.sub')) == "'q' from q-dist"
     assert runner.hidden_import(ModuleNotFoundError(name='other')) is None
+
+
+def test_closure_follows_requested_extras(monkeypatch: pytest.MonkeyPatch):
+    requires = {'p': ['a; extra == "x"', 'b']}
+    monkeypatch.setattr(importlib.metadata, 'requires', lambda name: requires.get(name, []))
+    assert runner.closure(['p[x]']) == {'p', 'a', 'b'}
+    assert runner.closure(['p']) == {'p', 'b'}
 
 
 def test_guard_unloads_packaging(monkeypatch: pytest.MonkeyPatch):

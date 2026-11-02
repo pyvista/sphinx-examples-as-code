@@ -71,6 +71,7 @@ KINDS = {
     'error': 'Fails as a notebook while the plain Python script runs',
     'timeout': 'Timed out',
     'missing-download': 'Pages missing a download format',
+    'no-downloads': 'Formats with no downloads at all',
     'python-mismatch': "Values that differ from the doctest's output in the script too",
     'python-error': 'Fails as a plain Python script',
 }
@@ -84,45 +85,55 @@ class Expected:
     want: str
 
 
-def stem(path: Path) -> str:
-    """Return the example name shared by all formats of one download."""
-    for suffix in (SUFFIXES['marimo'], SUFFIXES['jupyter'], SUFFIXES['python']):
-        if path.name.endswith(suffix):
-            return path.name.removesuffix(suffix)
-    return path.stem
-
-
 def fmt_of(name: str) -> str | None:
     """Return the format of a download file name, or None for anything else."""
-    if name.endswith(SUFFIXES['marimo']):
-        return 'marimo'
-    return next((f for f in ('jupyter', 'python') if name.endswith(SUFFIXES[f])), None)
+    matches = [fmt for fmt in FORMATS if name.endswith(SUFFIXES[fmt])]
+    return max(matches, key=lambda fmt: len(SUFFIXES[fmt]), default=None)
 
 
-def page_groups(text: str) -> list[tuple[list[str], list[str]]]:
-    """Return each download link group of a page with the code blocks that follow it."""
+def stem(path: Path) -> str:
+    """Return the example name shared by all formats of one download."""
+    fmt = fmt_of(path.name)
+    return path.name.removesuffix(SUFFIXES[fmt]) if fmt else path.stem
+
+
+def page_groups(text: str, position: str = 'top') -> list[tuple[list[str], list[str]]]:
+    """Return each download link group of a page with the code blocks of its example.
+
+    The blocks follow the links with ``position='top'`` and precede them with ``'bottom'``.
+    """
     events = [(m.start(), 'link', m[1]) for m in DOWNLOAD_LINK.finditer(text)]
     events += [(m.start(), 'block', m[1]) for m in CODE_BLOCK.finditer(text)]
     groups: list[tuple[list[str], list[str]]] = []
+    pending: list[str] = []
     last_link = -1
     for pos, kind, value in sorted(events):
-        if kind == 'link':
-            if groups and not groups[-1][1] and '</p>' not in text[last_link:pos]:
-                groups[-1][0].append(value)
-            else:
-                groups.append(([value], []))
+        if kind == 'block':
+            pending.append(html.unescape(TAG.sub('', value)))
+        elif groups and not pending and '</p>' not in text[last_link:pos]:
+            groups[-1][0].append(value)
             last_link = pos
-        elif groups:
-            groups[-1][1].append(html.unescape(TAG.sub('', value)))
+        else:
+            if position == 'bottom':
+                groups.append(([value], pending))
+            else:
+                if groups:
+                    groups[-1][1].extend(pending)
+                groups.append(([value], []))
+            pending, last_link = [], pos
+    if position == 'top' and groups:
+        groups[-1][1].extend(pending)
     return groups
 
 
-def expectations(html_dir: Path) -> dict[str, list[Expected]]:
-    """Map each download to the doctest statements with output shown after its links."""
+def expectations(html_dir: Path, position: str = 'top') -> dict[str, tuple[str, list[Expected]]]:
+    """Map each download to its link group and the doctest statements with output it shows."""
     parser = doctest.DocTestParser()
-    found: dict[str, list[Expected]] = {}
+    found: dict[str, tuple[str, list[Expected]]] = {}
     for page in sorted(html_dir.rglob('*.html')):
-        for links, blocks in page_groups(page.read_text(errors='replace')):
+        rel = page.relative_to(html_dir).as_posix()
+        text = page.read_text(errors='replace')
+        for index, (links, blocks) in enumerate(page_groups(text, position)):
             examples = [
                 Expected(ex.source, ex.want)
                 for block in blocks
@@ -131,7 +142,7 @@ def expectations(html_dir: Path) -> dict[str, list[Expected]]:
                 if ex.want.strip()
             ]
             for link in links:
-                found.setdefault(link, examples)
+                found.setdefault(link, (f'{rel}#{index}', examples))
     return found
 
 
@@ -344,7 +355,8 @@ def notebook_units(path: Path) -> list[tuple[list[ast.stmt], str | None]]:
     """Return each parsable code cell of an executed notebook with its text output."""
     if not path.exists():
         return []
-    code = [c for c in json.loads(path.read_text())['cells'] if c['cell_type'] == 'code']
+    cells = json.loads(path.read_text(encoding='utf-8'))['cells']
+    code = [c for c in cells if c['cell_type'] == 'code']
     return [
         (body, output_text(cell.get('outputs', [])))
         for cell in code
@@ -356,7 +368,7 @@ def notebook_error(path: Path) -> str:
     """Return the first error recorded in an executed notebook, or an empty string."""
     if not path.exists():
         return ''
-    for cell in json.loads(path.read_text())['cells']:
+    for cell in json.loads(path.read_text(encoding='utf-8'))['cells']:
         for out in cell.get('outputs', []):
             if out['output_type'] == 'error' and out['ename'] != 'Ancestor raised':
                 trace = TAG.sub('', re.sub(r'\x1b\[[\d;]*m', '', '\n'.join(out['traceback'])))
@@ -405,7 +417,7 @@ def error_finding(fmt: str, output: str) -> dict:
     """Classify a failed run by its output."""
     if BLOCKED in output:
         line = next(s for s in output.splitlines() if BLOCKED in s)
-        return {'kind': 'dependency', 'message': line.removeprefix(BLOCKED).strip()}
+        return {'kind': 'dependency', 'message': line.removeprefix(f'{BLOCKED} of ').strip()}
     if fmt == 'marimo' and (match := PRIVATE_NAME_ERROR.search(output)):
         return {'kind': 'marimo-rename', 'message': match[0]}
     return {'kind': 'error', 'message': output[-OUTPUT_TAIL:]}
@@ -465,7 +477,7 @@ def execute(path: Path, fmt: str, timeout: float, expected: list[Expected]) -> d
 def run(args: argparse.Namespace) -> None:
     """Check and execute every download of one format and write the results as JSON lines."""
     downloads = args.downloads.resolve()
-    expected = expectations(args.html.resolve()) if args.html else {}
+    expected = expectations(args.html.resolve(), args.link_position) if args.html else {}
     linked = set(expected) if args.html else None
     files = [
         f
@@ -475,13 +487,19 @@ def run(args: argparse.Namespace) -> None:
     print(f'{len(files)} {args.format} downloads in {downloads}', flush=True)
     failed = 0
     with ThreadPoolExecutor(args.workers) as pool, args.output.open('w') as out:
+        if not files:
+            finding = {'kind': 'no-downloads', 'message': f'no {args.format} downloads'}
+            record = {'file': args.format, 'name': '', 'format': args.format}
+            out.write(json.dumps({**record, 'findings': [finding]}) + '\n')
         futures = {}
         for f in files:
             rel = f.relative_to(downloads).as_posix()
-            future = pool.submit(execute, f, args.format, args.timeout, expected.get(rel, []))
-            futures[future] = rel
+            group, examples = expected.get(rel, (None, []))
+            future = pool.submit(execute, f, args.format, args.timeout, examples)
+            futures[future] = (rel, group)
         for i, future in enumerate(as_completed(futures), 1):
-            result = {'file': futures[future], **future.result()}
+            rel, group = futures[future]
+            result = {'file': rel, 'group': group, **future.result()}
             out.write(json.dumps(result) + '\n')
             out.flush()
             if result['findings']:
@@ -529,11 +547,16 @@ def report(args: argparse.Namespace) -> None:
     results = [
         json.loads(line)
         for path in args.results
-        for line in path.read_text().splitlines()
+        for line in path.read_text(encoding='utf-8').splitlines()
         if line.strip()
     ]
     script_findings = {
-        (r['name'], 'error' if f['kind'] in SCRIPT_FAILURES else f['kind'], f.get('statement'))
+        (
+            r.get('group'),
+            r['name'],
+            'error' if f['kind'] in SCRIPT_FAILURES else f['kind'],
+            f.get('statement'),
+        )
         for r in results
         if r['format'] == 'python'
         for f in r['findings']
@@ -542,7 +565,7 @@ def report(args: argparse.Namespace) -> None:
     for r in sorted(results, key=lambda r: (r['name'], r['format'])):
         for f in r['findings']:
             kind = f['kind']
-            in_script = (r['name'], kind, f.get('statement')) in script_findings
+            in_script = (r.get('group'), r['name'], kind, f.get('statement')) in script_findings
             if kind in ('error', 'mismatch') and (r['format'] == 'python' or in_script):
                 kind = f'python-{kind}'
             row = f'| `{Path(r["file"]).name}` | {r["format"]} | `{summary_line(f["message"])}` |'
@@ -591,6 +614,12 @@ def main(argv: list[str] | None = None) -> None:
     run_parser.add_argument('--format', choices=FORMATS, required=True)
     run_parser.add_argument('--output', type=Path, required=True, help='JSON lines file')
     run_parser.add_argument('--html', type=Path, help='the built HTML, for expected outputs')
+    run_parser.add_argument(
+        '--link-position',
+        choices=('top', 'bottom'),
+        default='top',
+        help="the extension's link_position, which places links before or after their example",
+    )
     run_parser.add_argument('--workers', type=int, default=os.cpu_count())
     run_parser.add_argument('--timeout', type=float, default=300, help='seconds per stage')
     run_parser.add_argument('--limit', type=int, help='run only the first N files')

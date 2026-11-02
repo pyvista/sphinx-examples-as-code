@@ -291,23 +291,26 @@ With `--html`, only downloads a page links to are run. Each finding has a kind:
 | `marimo-rename` | marimo renamed a name to a private `_name` and the cell raises `NameError` |
 | `error` | A notebook fails while the script of the same example runs |
 | `python-error` | The script fails too |
-| `timeout` | A download runs longer than `--timeout` seconds |
+| `timeout` | A download stage runs longer than `--timeout` seconds |
 | `missing-download` | A link group or gallery page lacks a format other pages have |
+| `no-downloads` | No download of the format exists at all |
 
 - Scripts run one top-level statement at a time. An import of a module that only
   distributions outside the `dependencies` of the script's inline metadata provide fails,
   as it would in the environment `uv run` builds.
 - Downloads run in the current environment and user account. Pass `--exclude` with glob
   patterns of example names to skip any that delete or overwrite files, e.g. a cache.
-- Expected outputs come from the doctest blocks after each download link, compared with
-  `ELLIPSIS`, `NORMALIZE_WHITESPACE` and pytest's `NUMBER`.
+- Expected outputs come from the doctest blocks of each download's example, compared with
+  `ELLIPSIS`, `NORMALIZE_WHITESPACE` and pytest's `NUMBER`. Pass `--link-position bottom`
+  when `link_position` is `'bottom'`.
 - `report` lists findings by kind and fails on all of them but `python-mismatch` and
   `python-error`, which the documentation build itself covers; pass `--allow` to choose.
 
 The reusable workflow `.github/workflows/audit-downloads.yml` runs this on a docs artifact
-of the calling repository, or of `repository`, one job per format, and can file the report as an issue. Each job
-runs `install` in a checkout of the docs repository's default branch, then installs the audit from
-the workflow's own commit:
+of the calling repository, or of `repository`, one job per format, and can file the report as
+an issue. Each job runs `install` in a checkout of the docs repository, at the calling
+workflow's ref when `repository` is empty and at its default branch otherwise, then installs
+the audit from the workflow's own commit:
 
 ```yaml
 jobs:

@@ -9,7 +9,7 @@ on:
     types: [labeled]  # the audit-downloads label runs it with the pull request's audit
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.label.name }}
   cancel-in-progress: false
 
 permissions: {}
@@ -33,6 +33,7 @@ jobs:
     with:
       repository: pyvista/pyvista
       artifact: docs-build-light
+      formats: '["python", "jupyter"]'  # marimo once PyVista's docs ship marimo downloads
       runs-on: ubuntu-22.04
       headless-display: true
       cache-path: pyvista-data

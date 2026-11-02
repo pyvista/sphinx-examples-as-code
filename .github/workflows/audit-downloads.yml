@@ -11,11 +11,14 @@ on:
       install:
         description: >-
           Shell command installing the documentation environment. Runs in a checkout of the docs
-          repository's default branch; the audit itself is then installed from this workflow's commit.
+          repository: the calling workflow's ref when `repository` is empty, else its default branch.
+          The audit itself is then installed from this workflow's commit.
         required: true
         type: string
       repository:
-        description: The `owner/repo` that builds the docs; empty for the calling repository.
+        description: >-
+          The public `owner/repo` that builds the docs, read with the workflow token; empty for the
+          calling repository.
         type: string
         default: ''
       run-id:
@@ -30,6 +33,10 @@ on:
         description: Folder inside the artifact that holds the HTML and `_downloads`.
         type: string
         default: .
+      link-position:
+        description: The docs' `link_position` in `sphinx_examples_as_code_conf`, `top` or `bottom`.
+        type: string
+        default: top
       setup:
         description: Shell command run before `install`, e.g. to fetch data the examples read.
         type: string
@@ -47,9 +54,11 @@ on:
         type: string
         default: '["python", "jupyter", "marimo"]'
       python-version:
+        description: Python version of the documentation environment.
         type: string
         default: '3.14'
       runs-on:
+        description: Runner of the audit jobs.
         type: string
         default: ubuntu-latest
       headless-display:
@@ -57,6 +66,7 @@ on:
         type: boolean
         default: false
       timeout-minutes:
+        description: Time limit of each audit job.
         type: number
         default: 360
       exclude:
@@ -104,6 +114,7 @@ jobs:
           and .head_repository.full_name == env.GH_REPO) | [.id, .head_sha] | @tsv'
         if [ -n "$RUN_ID" ]; then
           runs=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}" --jq "$trusted")
+          [ -n "$runs" ] || { echo "::error::run ${RUN_ID} is not a ${BRANCH} push build of ${GH_REPO}"; exit 1; }
         else
           runs=$(gh api "repos/${GH_REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&status=success&per_page=30" \
             --jq ".workflow_runs[] | $trusted")
@@ -191,10 +202,12 @@ jobs:
         FORMAT: ${{ matrix.format }}
         HTML: docs-artifact/${{ inputs.html-path }}
         EXCLUDE: ${{ inputs.exclude }}
+        LINK_POSITION: ${{ inputs.link-position }}
       # shellcheck disable=SC2086 # EXCLUDE is a list of words, kept unexpanded by set -f
       run: >-
         set -f; python -m sphinx_examples_as_code.audit run "$HTML/_downloads" --html "$HTML"
-        --format "$FORMAT" --output "results-${FORMAT}.jsonl" --exclude $EXCLUDE
+        --format "$FORMAT" --output "results-${FORMAT}.jsonl" --link-position "$LINK_POSITION"
+        --exclude $EXCLUDE
 
     - name: Find download links missing a format
       if: strategy.job-index == 0
@@ -257,7 +270,7 @@ jobs:
           echo "Not filed: the run is not on the default branch"
           exit 0
         fi
-        gh label create "$LABEL" --color cbb230 --description "Example downloads in the docs that fail" --force || true
+        gh label create "$LABEL" --color cbb230 --description "Example downloads in the docs that fail" || true
         note=""
         if [ "$AUDIT_RESULT" != "success" ]; then
           note="At least one audit job did not finish (\`${AUDIT_RESULT}\`), so the results are incomplete."

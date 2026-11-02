@@ -14,12 +14,16 @@ import re
 import sys
 import tomllib
 import traceback
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import ClassVar
 from typing import TextIO
 
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 METADATA = re.compile(r'(?m)^# /// script$\s(?P<content>(^#(| .*)$\s)+)^# ///$')
 # Printed to stderr for each import the dependencies do not cover.
@@ -88,15 +92,20 @@ class Guard(importlib.machinery.PathFinder):
 
 
 def hidden_import(exc: BaseException) -> str | None:
-    """Return the hidden module an exception failed to import, or that its traceback names."""
-    text = ''.join(traceback.format_exception(exc))
+    """Return the hidden module an import error failed to import, or that its traceback names."""
+    chain: list[BaseException] = []
     chained: BaseException | None = exc
     while chained is not None:
-        if isinstance(chained, ModuleNotFoundError) and chained.name:
-            top = chained.name.partition('.')[0]
+        chain.append(chained)
+        chained = chained.__cause__ or chained.__context__
+    for error in chain:
+        if isinstance(error, ModuleNotFoundError) and error.name:
+            top = error.name.partition('.')[0]
             if top in Guard.hidden:
                 return f'{top!r} from {Guard.hidden[top]}'
-        chained = chained.__cause__ or chained.__context__
+    if not any(isinstance(error, ImportError) for error in chain):
+        return None
+    text = ''.join(traceback.format_exception(exc))
     for module, dists in Guard.hidden.items():
         names = '|'.join(map(re.escape, [module, *dists.split(', ')]))
         if re.search(rf'\b({names})\b', text):
@@ -119,6 +128,11 @@ class Tee:
     def flush(self) -> None:
         """Flush the underlying stream."""
         self.stream.flush()
+
+    def writelines(self, lines: Iterable[str]) -> None:
+        """Write each of ``lines`` through and keep them."""
+        for line in lines:
+            self.write(line)
 
     def take(self) -> str:
         """Return and forget what was written since the last call."""
