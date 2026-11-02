@@ -98,13 +98,15 @@ jobs:
         ARTIFACT: ${{ inputs.artifact }}
       run: |
         BRANCH=$(gh api "repos/${GH_REPO}" --jq .default_branch)
+        export BRANCH
+        # Only default-branch pushes of the docs repository: the audit installs and runs that commit.
+        trusted='select(.event != "pull_request" and .head_branch == env.BRANCH
+          and .head_repository.full_name == env.GH_REPO) | [.id, .head_sha] | @tsv'
         if [ -n "$RUN_ID" ]; then
-          runs=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}" --jq '[.id, .head_sha] | @tsv')
+          runs=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}" --jq "$trusted")
         else
           runs=$(gh api "repos/${GH_REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&status=success&per_page=30" \
-            --jq '.workflow_runs[]
-              | select(.event != "pull_request" and .head_repository.full_name == env.GH_REPO)
-              | [.id, .head_sha] | @tsv')
+            --jq ".workflow_runs[] | $trusted")
         fi
         while IFS=$'\t' read -r id sha; do
           [ -n "$id" ] || continue
