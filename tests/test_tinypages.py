@@ -752,3 +752,71 @@ def test_footer_custom_string(tmp_path: Path):
     content = python_path.read_text(encoding='utf-8')
     assert '# Custom footer text.' in content
     assert 'sphinx-examples-as-code' not in content
+
+
+def _build_with_export(tmp_path: Path, *sphinx_args: str) -> Path:
+    """Build the fixture with ``export_dir`` set and return that export folder."""
+    export_dir = tmp_path / 'exported'
+    returncode, out, err = _run_sphinx_build(
+        _sphinx_build_cmd(
+            SRCDIR,
+            tmp_path / 'html',
+            tmp_path / 'doctrees',
+            ('-D', f'sphinx_examples_as_code_conf.export_dir={export_dir}', *sphinx_args),
+        ),
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    return export_dir
+
+
+def test_export_dir_skips_docstring_downloads_by_default(tmp_path: Path):
+    """By default ``export_dir`` copies gallery downloads only."""
+    export_dir = _build_with_export(tmp_path)
+    assert list((tmp_path / 'html' / '_downloads').rglob('*.ipynb'))
+    assert not export_dir.exists()
+
+
+def test_export_dir_docstrings(tmp_path: Path):
+    """With ``docstrings`` in ``export_sources``, every docstring download is copied too."""
+    export_dir = _build_with_export(
+        tmp_path, '-D', 'sphinx_examples_as_code_conf.export_sources=docstrings'
+    )
+    downloads = sorted((tmp_path / 'html' / '_downloads').glob('*/*.*'))
+    exported = sorted((export_dir / 'docstrings').rglob('*.*'))
+    assert downloads
+    assert sorted(p.name for p in exported) == sorted(p.name for p in downloads)
+    for path in exported:
+        fmt = path.relative_to(export_dir / 'docstrings').parts[0]
+        assert path.parent == export_dir / 'docstrings' / fmt
+        (download,) = (p for p in downloads if p.name == path.name)
+        assert path.read_bytes() == download.read_bytes()
+
+
+def test_export_dir_warns_on_clashing_downloads(tmp_path: Path):
+    """Two different downloads exported to one path warn, and the later page's file is kept."""
+    src_dir = tmp_path / 'src'
+    (src_dir / 'api').mkdir(parents=True)
+    (src_dir / 'conf.py').write_text(
+        "extensions = ['sphinx_examples_as_code']\n"
+        "sphinx_examples_as_code_conf = {'export_dir': '../exported',"
+        " 'export_sources': ['docstrings'], 'formats': ['python']}\n",
+        encoding='utf-8',
+    )
+    (src_dir / 'index.rst').write_text(
+        'Index\n=====\n\n.. toctree::\n\n   api/a\n   api/b\n', encoding='utf-8'
+    )
+    for page in ('a', 'b'):
+        (src_dir / 'api' / f'{page}.rst').write_text(
+            f'Page {page}\n======\n\n.. py:function:: pkg_{page}.read()\n\n   Read.\n\n'
+            f"   .. rubric:: Examples\n\n   >>> x = 'from {page}'\n",
+            encoding='utf-8',
+        )
+    cmd = _sphinx_build_cmd(src_dir, tmp_path / 'html', tmp_path / 'doctrees')
+    cmd.remove('-W')
+    returncode, out, err = _run_sphinx_build(cmd)
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+
+    assert len(list((tmp_path / 'html' / '_downloads').glob('*/read.py'))) == 2
+    assert err.count('replaces') == 1, err
+    exported = tmp_path / 'exported' / 'docstrings' / 'python' / 'api' / 'read.py'
+    assert "x = 'from b'" in exported.read_text(encoding='utf-8')

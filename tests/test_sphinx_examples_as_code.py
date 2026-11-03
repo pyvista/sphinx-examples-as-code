@@ -13,11 +13,11 @@ import doctest
 import inspect
 import io
 import json
+from pathlib import Path
 import re
 import subprocess
 import sys
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 from docutils import nodes
@@ -30,9 +30,6 @@ from sphinx_gallery._doctree_links import code_links_block
 from sphinx_gallery.gen_gallery import DEFAULT_GALLERY_CONF
 
 import sphinx_examples_as_code as seac
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _parse(rst: str) -> nodes.document:
@@ -1807,6 +1804,30 @@ def test_write_python_script_empty_name_fallback(tmp_path: Path):
     assert rel_path.endswith('/example.py')
 
 
+def test_export_downloads_copies_per_format_and_warns_on_clash(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    app = Mock(outdir=str(tmp_path))
+    first = seac._write_python_script(app, 'read', 'x = 1\n')
+    notebook = seac._write_jupyter_notebook(app, 'read', {'cells': []})
+    second = seac._write_python_script(app, 'read', 'x = 2\n')
+    folder = tmp_path / 'exported'
+    seac._reset_exports(app)
+
+    entries = [('Python', first), ('Jupyter', notebook)]
+    seac._export_downloads(app, 'api/a', ['jupyter', 'python'], entries, folder)
+    assert (folder / 'python' / 'api' / 'read.py').read_text() == 'x = 1\n'
+    assert (folder / 'jupyter' / 'api' / 'read.ipynb').is_file()
+    assert 'replaces' not in caplog.text
+
+    seac._export_downloads(app, 'api/b', ['python'], [('Python', second)], folder)
+    assert (folder / 'python' / 'api' / 'read.py').read_text() == 'x = 2\n'
+    assert f'Download {second} replaces {first}' in caplog.text
+
+    seac._reset_exports(app)
+    assert not seac._EXPORTED
+
+
 def test_make_download_node_single_entry():
     node = seac._make_download_node([('Download Python script', 'abc123/foo.py')])
     assert isinstance(node, nodes.paragraph)
@@ -2283,6 +2304,7 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
         'script_metadata': False,
+        'export_dir': None,
     }
 
     doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
@@ -2293,9 +2315,40 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
     assert isinstance(doctree[expected_index][0], addnodes.download_reference)
 
 
+@pytest.mark.parametrize(
+    ('gallery_downloads', 'doctree_factory', 'source'),
+    [
+        (True, lambda: _build_gallery_doctree(), 'gallery'),
+        (False, lambda: _parse('.. rubric:: Examples\n\n>>> x = 1'), 'docstrings'),
+    ],
+)
+def test_process_doctree_exports_by_source(
+    tmp_path: Path, gallery_downloads: bool, doctree_factory, source: str
+):
+    app = Mock(outdir=str(tmp_path / 'html'), confdir=str(tmp_path / 'src'))
+    app.builder.download_support = True
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'gallery_downloads': gallery_downloads,
+        'footer': None,
+        'export_dir': '../exported',
+        'export_sources': list(seac._SOURCE_ORDER),
+    }
+    seac._reset_exports(app)
+
+    seac._process_doctree(app, doctree_factory(), 'examples/plot_minimal')
+
+    exported = tmp_path / 'exported'
+    assert [p.relative_to(exported).parts[:3] for p in exported.rglob('*.py')] == [
+        (source, 'python', 'examples')
+    ]
+
+
 def test_setup_registers_connect_and_config():
     app = Mock()
     result = seac.setup(app)
+    app.connect.assert_any_call('builder-inited', seac._reset_exports)
     app.connect.assert_any_call('doctree-resolved', seac._process_doctree)
     app.connect.assert_any_call('config-inited', seac._finalize_conf)
     app.connect.assert_any_call('config-inited', seac._disable_gallery_notebooks, priority=5)
@@ -2705,6 +2758,7 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
         'script_metadata': False,
+        'export_dir': None,
     }
 
     doctree = _build_gallery_doctree()
@@ -2725,6 +2779,7 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
         'script_metadata': False,
+        'export_dir': None,
     }
 
     doctree = _build_gallery_doctree()
@@ -3526,6 +3581,37 @@ def test_finalize_conf_accepts_requires_python_string():
     config = Mock(sphinx_examples_as_code_conf={'requires_python': '>=3.10'})
     seac._finalize_conf(Mock(), config)
     assert config.sphinx_examples_as_code_conf['requires_python'] == '>=3.10'
+
+
+@pytest.mark.parametrize('export_dir', ['', 1, ['out']])
+def test_finalize_conf_invalid_export_dir_raises(export_dir: object):
+    config = Mock(sphinx_examples_as_code_conf={'export_dir': export_dir})
+    with pytest.raises(ConfigError, match=r"\['export_dir'\] must be a path"):
+        seac._finalize_conf(Mock(), config)
+
+
+@pytest.mark.parametrize('export_sources', [['pages'], 'gallery,pages', ('gallery',)])
+def test_finalize_conf_invalid_export_sources_raises(export_sources: object):
+    config = Mock(sphinx_examples_as_code_conf={'export_sources': export_sources})
+    with pytest.raises(ConfigError, match=r"\['export_sources'\] must be a list"):
+        seac._finalize_conf(Mock(), config)
+
+
+@pytest.mark.parametrize(
+    ('export_sources', 'expected'),
+    [('gallery,docstrings', ['gallery', 'docstrings']), (['docstrings'], ['docstrings']), ([], [])],
+)
+def test_finalize_conf_accepts_export_sources(export_sources: object, expected: list[str]):
+    config = Mock(sphinx_examples_as_code_conf={'export_sources': export_sources})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['export_sources'] == expected
+
+
+@pytest.mark.parametrize('export_dir', ['_build/examples-as-code', Path('out'), None])
+def test_finalize_conf_accepts_export_dir(export_dir: object):
+    config = Mock(sphinx_examples_as_code_conf={'export_dir': export_dir})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['export_dir'] == export_dir
 
 
 @pytest.fixture

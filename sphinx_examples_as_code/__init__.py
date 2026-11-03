@@ -13,9 +13,11 @@ import hashlib
 import importlib.metadata
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import sys
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
@@ -188,6 +190,11 @@ def _is_see_also_section(node: nodes.Node) -> bool:
 _FMT_PYTHON = 'python'
 _FMT_JUPYTER = 'jupyter'
 _FMT_MARIMO = 'marimo'
+
+#: Download source names: sphinx-gallery pages and docstring Examples sections.
+_SOURCE_GALLERY = 'gallery'
+_SOURCE_DOCSTRINGS = 'docstrings'
+_SOURCE_ORDER = (_SOURCE_GALLERY, _SOURCE_DOCSTRINGS)
 
 #: File name suffix of each download format, e.g. ``pyvista_read_marimo.py``.
 _SUFFIXES = {_FMT_PYTHON: '.py', _FMT_JUPYTER: '.ipynb', _FMT_MARIMO: '_marimo.py'}
@@ -1575,6 +1582,43 @@ def _build_download_entries(
     return entries
 
 
+def _export_downloads(
+    app: Sphinx,
+    docname: str,
+    formats: list[str],
+    entries: list[tuple[str, str]],
+    folder: Path,
+) -> None:
+    """Copy a page's downloads to ``<folder>/<format>/<docname's folder>/``."""
+    # Entries come back in _FORMAT_ORDER, one per requested format.
+    written = [fmt for fmt in _FORMAT_ORDER if fmt in formats]
+    for fmt, (_label, rel_path) in zip(written, entries, strict=True):
+        out_path = folder / fmt / Path(docname).parent / Path(rel_path).name
+        previous = _EXPORTED.setdefault(out_path, rel_path)
+        if previous != rel_path:
+            logger.warning(
+                'Download %s replaces %s at export path %s.',
+                rel_path,
+                previous,
+                out_path,
+                type='sphinx_examples_as_code',
+                subtype='export',
+                location=docname,
+            )
+            _EXPORTED[out_path] = rel_path
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path(app.outdir) / '_downloads' / rel_path, out_path)
+
+
+#: Export path to the ``_downloads`` file last copied there, for the current build.
+_EXPORTED: dict[Path, str] = {}
+
+
+def _reset_exports(_app: Sphinx) -> None:
+    """Forget the previous build's exports."""
+    _EXPORTED.clear()
+
+
 def _process_span(
     app: Sphinx,
     docname: str,
@@ -1588,6 +1632,7 @@ def _process_span(
     footer: str | None,
     link_labels: dict[str, str],
     script_metadata: dict | None = None,
+    export_folder: Path | None = None,
 ) -> None:
     """Convert one Examples span and insert download link(s) if it has real code."""
     nodes_in_span = list(parent.children[start:end])
@@ -1606,6 +1651,8 @@ def _process_span(
     )
     if not entries:
         return
+    if export_folder is not None:
+        _export_downloads(app, docname, formats, entries, export_folder)
 
     download_node = _make_download_node(entries)
     parent.insert(start if position == 'top' else end, download_node)
@@ -1684,6 +1731,7 @@ def _process_gallery_page(
     footer: str | None,
     link_labels: dict[str, str],
     script_metadata: dict | None = None,
+    export_folder: Path | None = None,
 ) -> None:
     """Replace a sphinx-gallery page's own download footer with converted downloads.
 
@@ -1730,6 +1778,8 @@ def _process_gallery_page(
     )
     if not entries:
         return
+    if export_folder is not None:
+        _export_downloads(app, docname, formats, entries, export_folder)
 
     download_node = _make_download_node(entries)
     if position == 'top' and isinstance(first, nodes.section):
@@ -1762,9 +1812,24 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
         else None
     )
 
+    export_dir = conf['export_dir']
+    export_folders = (
+        {}
+        if export_dir is None
+        else {source: Path(app.confdir, export_dir, source) for source in conf['export_sources']}
+    )
+
     if conf['gallery_downloads']:
         _process_gallery_page(
-            app, docname, doctree, position, formats, footer, link_labels, script_metadata
+            app,
+            docname,
+            doctree,
+            position,
+            formats,
+            footer,
+            link_labels,
+            script_metadata,
+            export_folders.get(_SOURCE_GALLERY),
         )
 
     # Process spans per shared parent, last to first.
@@ -1786,6 +1851,7 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
             footer,
             link_labels,
             script_metadata,
+            export_folders.get(_SOURCE_DOCSTRINGS),
         )
 
 
@@ -1806,6 +1872,8 @@ _CONF_DEFAULTS: dict[str, object] = {
     'script_metadata': False,
     'dependencies': {},
     'requires_python': None,
+    'export_dir': None,
+    'export_sources': [_SOURCE_GALLERY],
 }
 
 
@@ -1821,7 +1889,7 @@ def _coerce_conf_value(key: str, value: object) -> object:
     """
     if not isinstance(value, str):
         return value
-    if key == 'formats':
+    if key in ('formats', 'export_sources'):
         return value.split(',')
     if key in ('gallery_downloads', 'script_metadata'):
         if value == '0':
@@ -1830,7 +1898,7 @@ def _coerce_conf_value(key: str, value: object) -> object:
             return True
         msg = f"sphinx_examples_as_code_conf[{key!r}] must be '0' or '1', got {value!r}."
         raise ConfigError(msg)
-    return value  # link_position, footer, requires_python: a string is already the real type
+    return value  # link_position, footer, requires_python, export_dir: already the real type
 
 
 def _merged_link_labels(value: object) -> dict[str, str]:
@@ -1920,6 +1988,28 @@ def _validate_requires_python(requires_python: object) -> None:
     raise ConfigError(msg)
 
 
+def _validate_export_dir(export_dir: object) -> None:
+    """Raise a ``ConfigError`` unless ``export_dir`` is ``None`` or a non-empty path."""
+    if export_dir is None or (isinstance(export_dir, (str, os.PathLike)) and str(export_dir)):
+        return
+    msg = (
+        "sphinx_examples_as_code_conf['export_dir'] must be a path such as "
+        f"'_build/examples-as-code', or None, got {export_dir!r}."
+    )
+    raise ConfigError(msg)
+
+
+def _validate_export_sources(sources: object) -> None:
+    """Raise a ``ConfigError`` unless ``sources`` is a list of known export sources."""
+    if isinstance(sources, list) and all(source in _SOURCE_ORDER for source in sources):
+        return
+    msg = (
+        "sphinx_examples_as_code_conf['export_sources'] must be a list of "
+        f'{", ".join(map(repr, _SOURCE_ORDER))}, got {sources!r}.'
+    )
+    raise ConfigError(msg)
+
+
 def _marimo_converter_available() -> bool:
     """Check whether marimo's notebook converter (marimo 0.14 or newer) is importable."""
     try:
@@ -1948,6 +2038,8 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
     _validate_dependencies(merged['dependencies'])
     _validate_requires_python(merged['requires_python'])
+    _validate_export_dir(merged['export_dir'])
+    _validate_export_sources(merged['export_sources'])
     _validate_formats(merged['formats'])
     if _FMT_MARIMO in merged['formats'] and not _marimo_converter_available():
         if 'formats' in user_conf:
@@ -2001,6 +2093,7 @@ def _disable_gallery_notebooks(_app: Sphinx, config: Config) -> None:
 
 def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     """Register the extension."""
+    app.connect('builder-inited', _reset_exports)
     app.connect('doctree-resolved', _process_doctree)
     app.add_post_transform(_KeepDoctestFlags)
     app.connect('config-inited', _finalize_conf)
