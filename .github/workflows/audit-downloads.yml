@@ -23,9 +23,9 @@ on:
         default: ''
       build:
         description: >-
-          Shell command building the docs after `install` and this workflow's commit of the
-          extension, in place of downloading an artifact; `html-path` is then the checkout's
-          folder it builds the HTML into.
+          Shell command run after `install` that builds the docs with this workflow's commit of
+          the extension, instead of downloading an artifact; `html-path` is then the folder of the
+          checkout it writes the HTML to, and `run-id` and `docs-workflow` are unused.
         type: string
         default: ''
       run-id:
@@ -65,7 +65,7 @@ on:
         type: string
         default: '3.14'
       runs-on:
-        description: Runner of the audit jobs.
+        description: Runner of the build and audit jobs.
         type: string
         default: ubuntu-latest
       headless-display:
@@ -73,7 +73,7 @@ on:
         type: boolean
         default: false
       timeout-minutes:
-        description: Time limit of each audit job.
+        description: Time limit of the build job and of each audit job.
         type: number
         default: 360
       exclude:
@@ -194,7 +194,7 @@ jobs:
 
     - name: Install this workflow's commit of the extension
       env:
-        SEAC: sphinx-examples-as-code[gallery,audit] @ git+https://github.com/${{ job.workflow_repository }}@${{ job.workflow_sha }}
+        SEAC: sphinx-examples-as-code @ git+https://github.com/${{ job.workflow_repository }}@${{ job.workflow_sha }}
       run: uv pip install "$SEAC"
 
     - name: Build the docs
@@ -340,9 +340,8 @@ jobs:
         GH_REPO: ${{ github.repository }}
         LABEL: ${{ inputs.issue-label }}
         AUDIT_RESULT: ${{ needs.audit.result }}
-        DOCS_RUN_URL: >-
-          ${{ github.server_url }}/${{ inputs.build == '' && inputs.repository || github.repository
-          }}/actions/runs/${{ needs.find-build.outputs.run-id || github.run_id }}
+        DOCS_REPO: ${{ inputs.build == '' && inputs.repository || github.repository }}
+        DOCS_RUN_ID: ${{ needs.find-build.outputs.run-id || github.run_id }}
         DOCS_SHA: ${{ needs.find-build.outputs.sha || needs.build.outputs.sha }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
@@ -357,7 +356,7 @@ jobs:
         fi
         # Stay under GitHub's 65536 character limit for an issue body.
         body=$(printf '### Example download audit\n\n**Run:** %s\n**Docs build:** %s at `%s`\n\n%s\n\n%s\n' \
-          "$RUN_URL" "$DOCS_RUN_URL" "${DOCS_SHA:0:8}" "$note" "$(head -c 60000 report.md)")
+          "$RUN_URL" "${GITHUB_SERVER_URL}/${DOCS_REPO}/actions/runs/${DOCS_RUN_ID}" "${DOCS_SHA:0:8}" "$note" "$(head -c 60000 report.md)")
         existing=$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')
         if [ -n "$existing" ]; then
           gh issue comment "$existing" --body "$body"
