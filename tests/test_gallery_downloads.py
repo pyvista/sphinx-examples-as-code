@@ -47,6 +47,7 @@ def _build(
     gallery_downloads: bool | None,
     formats: str | None = None,
     export_dir: str | None = None,
+    export_sources: str | None = None,
 ) -> tuple[int, str, str, Path]:
     # Copy the fixture rather than building from it in place: sphinx-gallery
     # writes its generated .rst files *into* examples_dirs' sibling
@@ -68,6 +69,12 @@ def _build(
         sphinx_args = (*sphinx_args, '-D', f'sphinx_examples_as_code_conf.formats={formats}')
     if export_dir is not None:
         sphinx_args = (*sphinx_args, '-D', f'sphinx_examples_as_code_conf.export_dir={export_dir}')
+    if export_sources is not None:
+        sphinx_args = (
+            *sphinx_args,
+            '-D',
+            f'sphinx_examples_as_code_conf.export_sources={export_sources}',
+        )
     returncode, out, err = _run_sphinx_build(
         _sphinx_build_cmd(src_dir, html_dir, doctree_dir, sphinx_args)
     )
@@ -351,7 +358,7 @@ def test_gallery_downloads_no_export_by_default(gallery_build: tuple[Path, str])
 
 @pytest.mark.parametrize('relative', [True, False])
 def test_gallery_downloads_export_dir(tmp_path: Path, relative: bool):
-    """Each gallery download is also copied to ``<export_dir>/<format>/<docname's folder>/``."""
+    """Each gallery download is also copied to ``<export_dir>/gallery/<format>/<folder>/``."""
     export_dir = 'exported' if relative else str(tmp_path / 'exported')
     returncode, out, err, html_dir = _build(
         tmp_path, gallery_downloads=True, formats='python,jupyter,marimo', export_dir=export_dir
@@ -365,13 +372,14 @@ def test_gallery_downloads_export_dir(tmp_path: Path, relative: bool):
         'marimo': 'plot_minimal_marimo.py',
     }
     assert sorted(p.relative_to(exported).as_posix() for p in exported.rglob('*.*')) == sorted(
-        f'{fmt}/auto_examples/{filename}' for fmt, filename in expected.items()
+        f'gallery/{fmt}/auto_examples/{filename}' for fmt, filename in expected.items()
     )
     for fmt, filename in expected.items():
         # sphinx-gallery also copies its own plot_minimal.py; the marimo name is ours alone.
         matches = list((html_dir / '_downloads').glob(f'*/{filename}'))
         (download,) = matches if fmt == 'marimo' else [p for p in matches if _is_ours(p)]
-        assert (exported / fmt / 'auto_examples' / filename).read_bytes() == download.read_bytes()
+        exported_file = exported / 'gallery' / fmt / 'auto_examples' / filename
+        assert exported_file.read_bytes() == download.read_bytes()
 
 
 def test_gallery_downloads_export_dir_only_requested_formats(tmp_path: Path):
@@ -381,4 +389,17 @@ def test_gallery_downloads_export_dir_only_requested_formats(tmp_path: Path):
         tmp_path, gallery_downloads=True, formats='jupyter', export_dir=str(export_dir)
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
-    assert [p.name for p in export_dir.iterdir()] == ['jupyter']
+    assert [p.name for p in (export_dir / 'gallery').iterdir()] == ['jupyter']
+
+
+def test_gallery_downloads_export_sources_without_gallery(tmp_path: Path):
+    """Leaving ``gallery`` out of ``export_sources`` exports no gallery download."""
+    export_dir = tmp_path / 'exported'
+    returncode, out, err, _html_dir = _build(
+        tmp_path,
+        gallery_downloads=True,
+        export_dir=str(export_dir),
+        export_sources='docstrings',
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    assert not (export_dir / 'gallery').exists()

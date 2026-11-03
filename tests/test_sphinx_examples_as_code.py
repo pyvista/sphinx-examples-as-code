@@ -2280,6 +2280,7 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
         'script_metadata': False,
+        'export_dir': None,
     }
 
     doctree = _parse('.. rubric:: Examples\n\n>>> x = 1')
@@ -2702,6 +2703,7 @@ def test_process_doctree_gallery_mode_disabled_by_default(tmp_path: Path):
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
         'script_metadata': False,
+        'export_dir': None,
     }
 
     doctree = _build_gallery_doctree()
@@ -3531,6 +3533,23 @@ def test_finalize_conf_invalid_export_dir_raises(export_dir: object):
     config = Mock(sphinx_examples_as_code_conf={'export_dir': export_dir})
     with pytest.raises(ConfigError, match=r"\['export_dir'\] must be a path"):
         seac._finalize_conf(Mock(), config)
+
+
+@pytest.mark.parametrize('export_sources', [['pages'], 'gallery,pages', ('gallery',)])
+def test_finalize_conf_invalid_export_sources_raises(export_sources: object):
+    config = Mock(sphinx_examples_as_code_conf={'export_sources': export_sources})
+    with pytest.raises(ConfigError, match=r"\['export_sources'\] must be a list"):
+        seac._finalize_conf(Mock(), config)
+
+
+@pytest.mark.parametrize(
+    ('export_sources', 'expected'),
+    [('gallery,docstrings', ['gallery', 'docstrings']), (['docstrings'], ['docstrings']), ([], [])],
+)
+def test_finalize_conf_accepts_export_sources(export_sources: object, expected: list[str]):
+    config = Mock(sphinx_examples_as_code_conf={'export_sources': export_sources})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['export_sources'] == expected
 
 
 @pytest.mark.parametrize('export_dir', ['_build/examples-as-code', Path('out'), None])

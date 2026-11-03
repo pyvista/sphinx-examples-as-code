@@ -754,17 +754,39 @@ def test_footer_custom_string(tmp_path: Path):
     assert 'sphinx-examples-as-code' not in content
 
 
-def test_export_dir_skips_docstring_downloads(tmp_path: Path):
-    """``export_dir`` copies gallery downloads only, never docstring Examples downloads."""
+def _build_with_export(tmp_path: Path, *sphinx_args: str) -> Path:
+    """Build the fixture with ``export_dir`` set and return that export folder."""
     export_dir = tmp_path / 'exported'
     returncode, out, err = _run_sphinx_build(
         _sphinx_build_cmd(
             SRCDIR,
             tmp_path / 'html',
             tmp_path / 'doctrees',
-            ('-D', f'sphinx_examples_as_code_conf.export_dir={export_dir}'),
+            ('-D', f'sphinx_examples_as_code_conf.export_dir={export_dir}', *sphinx_args),
         ),
     )
     assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    return export_dir
+
+
+def test_export_dir_skips_docstring_downloads_by_default(tmp_path: Path):
+    """By default ``export_dir`` copies gallery downloads only."""
+    export_dir = _build_with_export(tmp_path)
     assert list((tmp_path / 'html' / '_downloads').rglob('*.ipynb'))
     assert not export_dir.exists()
+
+
+def test_export_dir_docstrings(tmp_path: Path):
+    """With ``docstrings`` in ``export_sources``, every docstring download is copied too."""
+    export_dir = _build_with_export(
+        tmp_path, '-D', 'sphinx_examples_as_code_conf.export_sources=docstrings'
+    )
+    downloads = sorted((tmp_path / 'html' / '_downloads').glob('*/*.*'))
+    exported = sorted((export_dir / 'docstrings').rglob('*.*'))
+    assert downloads
+    assert sorted(p.name for p in exported) == sorted(p.name for p in downloads)
+    for path in exported:
+        fmt = path.relative_to(export_dir / 'docstrings').parts[0]
+        assert path.parent == export_dir / 'docstrings' / fmt
+        (download,) = (p for p in downloads if p.name == path.name)
+        assert path.read_bytes() == download.read_bytes()
