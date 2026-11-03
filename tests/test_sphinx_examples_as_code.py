@@ -3122,6 +3122,7 @@ def fake_classifiers(monkeypatch: pytest.MonkeyPatch):
             lambda name: name in classifiers and name not in pure,
         )
 
+    monkeypatch.setattr(seac, '_BUILD_PYTHON_MINOR', 10)
     seac._newest_python_minor.cache_clear()
     yield install
     seac._newest_python_minor.cache_clear()
@@ -3141,9 +3142,24 @@ def test_python_upper_bound_takes_lowest_newest_version(fake_classifiers):
     assert seac._python_upper_bound(['numpy', 'PyVista[jupyter]', 'vtk', 'missing']) == '<3.15'
 
 
-def test_python_upper_bound_none_without_classifiers(fake_classifiers):
+def test_python_upper_bound_build_python_without_classifiers(fake_classifiers):
     fake_classifiers({'vtk': []})
-    assert seac._python_upper_bound(['vtk', 'missing']) is None
+    assert seac._python_upper_bound(['vtk', 'missing']) == '<3.11'
+
+
+def test_python_upper_bound_none_without_counted_dependencies(fake_classifiers):
+    fake_classifiers({'cycler': ['Programming Language :: Python :: 3.12']}, pure=('cycler',))
+    assert seac._python_upper_bound(['cycler', 'missing']) is None
+
+
+def test_python_upper_bound_not_below_build_python(
+    fake_classifiers, monkeypatch: pytest.MonkeyPatch
+):
+    fake_classifiers({'vtk': ['Programming Language :: Python :: 3.13']})
+    monkeypatch.setattr(seac, '_BUILD_PYTHON_MINOR', 14)
+    assert seac._python_upper_bound(['vtk']) == '<3.15'
+    monkeypatch.setattr(seac, '_BUILD_PYTHON_MINOR', 12)
+    assert seac._python_upper_bound(['vtk']) == '<3.14'
 
 
 def test_python_upper_bound_skips_pure_dependencies_except_project(fake_classifiers):
