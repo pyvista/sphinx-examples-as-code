@@ -98,12 +98,15 @@ sphinx_examples_as_code_conf = {
   `'>=3.10'`. `None` (default) derives one from the dependencies instead; see
   [Dependencies and run commands](#dependencies-and-run-commands). Only used with
   `script_metadata` on.
-- `export_dir`: a folder that also receives a copy of every download, at
-  `<export_dir>/<source>/<format>/<folder>/<file>`, e.g.
+- `export_dir`: a folder that also receives a copy of each download from the sources in
+  `export_sources`, at `<export_dir>/<source>/<format>/<folder>/<file>`, e.g.
   `gallery/jupyter/auto_examples/plot_minimal.ipynb` for the gallery page
   `auto_examples/plot_minimal`. `<folder>` is the folder of the page the download is
   on. A relative path is relative to the folder holding `conf.py`. `None` (default)
-  exports nothing.
+  exports nothing. Only HTML builders export, and only for the pages they write. The
+  folder is never cleared, so build with `-E` into an empty folder for a complete,
+  current copy. Two downloads that would land on the same path raise a warning, and
+  the later one is kept.
 - `export_sources`: which downloads `export_dir` copies. A list containing any of
   `'gallery'` (sphinx-gallery pages, only with `gallery_downloads` on) and
   `'docstrings'` (Examples sections); defaults to `['gallery']`.

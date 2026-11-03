@@ -350,10 +350,10 @@ def test_gallery_downloads_enabled_warns_about_notebook_settings(tmp_path: Path)
 
 
 def test_gallery_downloads_no_export_by_default(gallery_build: tuple[Path, str]):
-    """Without ``export_dir``, the downloads exist only under ``_downloads``."""
+    """Without ``export_dir``, no export folder is written anywhere."""
     html_dir, _html = gallery_build
-    assert not (html_dir.parent / 'src' / 'python').exists()
-    assert not (html_dir / 'python').exists()
+    assert list((html_dir / '_downloads').rglob('plot_minimal.ipynb'))
+    assert not [p for p in html_dir.parent.rglob('gallery') if p.is_dir()]
 
 
 @pytest.mark.parametrize('relative', [True, False])

@@ -790,3 +790,33 @@ def test_export_dir_docstrings(tmp_path: Path):
         assert path.parent == export_dir / 'docstrings' / fmt
         (download,) = (p for p in downloads if p.name == path.name)
         assert path.read_bytes() == download.read_bytes()
+
+
+def test_export_dir_warns_on_clashing_downloads(tmp_path: Path):
+    """Two different downloads exported to one path warn, and the later page's file is kept."""
+    src_dir = tmp_path / 'src'
+    (src_dir / 'api').mkdir(parents=True)
+    (src_dir / 'conf.py').write_text(
+        "extensions = ['sphinx_examples_as_code']\n"
+        "sphinx_examples_as_code_conf = {'export_dir': '../exported',"
+        " 'export_sources': ['docstrings'], 'formats': ['python']}\n",
+        encoding='utf-8',
+    )
+    (src_dir / 'index.rst').write_text(
+        'Index\n=====\n\n.. toctree::\n\n   api/a\n   api/b\n', encoding='utf-8'
+    )
+    for page in ('a', 'b'):
+        (src_dir / 'api' / f'{page}.rst').write_text(
+            f'Page {page}\n======\n\n.. py:function:: pkg_{page}.read()\n\n   Read.\n\n'
+            f"   .. rubric:: Examples\n\n   >>> x = 'from {page}'\n",
+            encoding='utf-8',
+        )
+    cmd = _sphinx_build_cmd(src_dir, tmp_path / 'html', tmp_path / 'doctrees')
+    cmd.remove('-W')
+    returncode, out, err = _run_sphinx_build(cmd)
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+
+    assert len(list((tmp_path / 'html' / '_downloads').glob('*/read.py'))) == 2
+    assert err.count('replaces') == 1, err
+    exported = tmp_path / 'exported' / 'docstrings' / 'python' / 'api' / 'read.py'
+    assert "x = 'from b'" in exported.read_text(encoding='utf-8')

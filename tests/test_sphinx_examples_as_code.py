@@ -1804,6 +1804,30 @@ def test_write_python_script_empty_name_fallback(tmp_path: Path):
     assert rel_path.endswith('/example.py')
 
 
+def test_export_downloads_copies_per_format_and_warns_on_clash(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    app = Mock(outdir=str(tmp_path))
+    first = seac._write_python_script(app, 'read', 'x = 1\n')
+    notebook = seac._write_jupyter_notebook(app, 'read', {'cells': []})
+    second = seac._write_python_script(app, 'read', 'x = 2\n')
+    folder = tmp_path / 'exported'
+    seac._reset_exports(app)
+
+    entries = [('Python', first), ('Jupyter', notebook)]
+    seac._export_downloads(app, 'api/a', ['jupyter', 'python'], entries, folder)
+    assert (folder / 'python' / 'api' / 'read.py').read_text() == 'x = 1\n'
+    assert (folder / 'jupyter' / 'api' / 'read.ipynb').is_file()
+    assert 'replaces' not in caplog.text
+
+    seac._export_downloads(app, 'api/b', ['python'], [('Python', second)], folder)
+    assert (folder / 'python' / 'api' / 'read.py').read_text() == 'x = 2\n'
+    assert f'Download {second} replaces {first}' in caplog.text
+
+    seac._reset_exports(app)
+    assert not seac._EXPORTED
+
+
 def test_make_download_node_single_entry():
     node = seac._make_download_node([('Download Python script', 'abc123/foo.py')])
     assert isinstance(node, nodes.paragraph)
