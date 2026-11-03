@@ -42,7 +42,11 @@ _GALLERY_FURNITURE_MARKERS = _GALLERY_DOWNLOAD_UI_MARKERS + _GALLERY_KEPT_ON_PAG
 
 
 def _build(
-    tmp_path: Path, *, gallery_downloads: bool | None, formats: str | None = None
+    tmp_path: Path,
+    *,
+    gallery_downloads: bool | None,
+    formats: str | None = None,
+    export_dir: str | None = None,
 ) -> tuple[int, str, str, Path]:
     # Copy the fixture rather than building from it in place: sphinx-gallery
     # writes its generated .rst files *into* examples_dirs' sibling
@@ -62,6 +66,8 @@ def _build(
         sphinx_args = ('-D', f'sphinx_examples_as_code_conf.gallery_downloads={flag}')
     if formats is not None:
         sphinx_args = (*sphinx_args, '-D', f'sphinx_examples_as_code_conf.formats={formats}')
+    if export_dir is not None:
+        sphinx_args = (*sphinx_args, '-D', f'sphinx_examples_as_code_conf.export_dir={export_dir}')
     returncode, out, err = _run_sphinx_build(
         _sphinx_build_cmd(src_dir, html_dir, doctree_dir, sphinx_args)
     )
@@ -334,3 +340,45 @@ def test_gallery_downloads_enabled_warns_about_notebook_settings(tmp_path: Path)
     assert "sphinx_gallery_conf key(s) 'pypandoc', 'first_notebook_cell' have no effect" in err
     assert "'pypandoc' not available" not in err
     assert not list((src_dir / 'auto_examples').rglob('*.ipynb'))
+
+
+def test_gallery_downloads_no_export_by_default(gallery_build: tuple[Path, str]):
+    """Without ``export_dir``, the downloads exist only under ``_downloads``."""
+    html_dir, _html = gallery_build
+    assert not (html_dir.parent / 'src' / 'python').exists()
+    assert not (html_dir / 'python').exists()
+
+
+@pytest.mark.parametrize('relative', [True, False])
+def test_gallery_downloads_export_dir(tmp_path: Path, relative: bool):
+    """Each gallery download is also copied to ``<export_dir>/<format>/<docname's folder>/``."""
+    export_dir = 'exported' if relative else str(tmp_path / 'exported')
+    returncode, out, err, html_dir = _build(
+        tmp_path, gallery_downloads=True, formats='python,jupyter,marimo', export_dir=export_dir
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+
+    exported = (tmp_path / 'src' / 'exported') if relative else (tmp_path / 'exported')
+    expected = {
+        'python': 'plot_minimal.py',
+        'jupyter': 'plot_minimal.ipynb',
+        'marimo': 'plot_minimal_marimo.py',
+    }
+    assert sorted(p.relative_to(exported).as_posix() for p in exported.rglob('*.*')) == sorted(
+        f'{fmt}/auto_examples/{filename}' for fmt, filename in expected.items()
+    )
+    for fmt, filename in expected.items():
+        # sphinx-gallery also copies its own plot_minimal.py; the marimo name is ours alone.
+        matches = list((html_dir / '_downloads').glob(f'*/{filename}'))
+        (download,) = matches if fmt == 'marimo' else [p for p in matches if _is_ours(p)]
+        assert (exported / fmt / 'auto_examples' / filename).read_bytes() == download.read_bytes()
+
+
+def test_gallery_downloads_export_dir_only_requested_formats(tmp_path: Path):
+    """Only the formats in ``formats`` are exported."""
+    export_dir = tmp_path / 'exported'
+    returncode, out, err, _html_dir = _build(
+        tmp_path, gallery_downloads=True, formats='jupyter', export_dir=str(export_dir)
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    assert [p.name for p in export_dir.iterdir()] == ['jupyter']

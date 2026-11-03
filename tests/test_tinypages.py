@@ -752,3 +752,19 @@ def test_footer_custom_string(tmp_path: Path):
     content = python_path.read_text(encoding='utf-8')
     assert '# Custom footer text.' in content
     assert 'sphinx-examples-as-code' not in content
+
+
+def test_export_dir_skips_docstring_downloads(tmp_path: Path):
+    """``export_dir`` copies gallery downloads only, never docstring Examples downloads."""
+    export_dir = tmp_path / 'exported'
+    returncode, out, err = _run_sphinx_build(
+        _sphinx_build_cmd(
+            SRCDIR,
+            tmp_path / 'html',
+            tmp_path / 'doctrees',
+            ('-D', f'sphinx_examples_as_code_conf.export_dir={export_dir}'),
+        ),
+    )
+    assert returncode == 0, f'sphinx build failed with stdout:\n{out}\nstderr:\n{err}\n'
+    assert list((tmp_path / 'html' / '_downloads').rglob('*.ipynb'))
+    assert not export_dir.exists()

@@ -57,6 +57,7 @@ sphinx_examples_as_code_conf = {
     'script_metadata': False,
     'dependencies': {},
     'requires_python': None,
+    'export_dir': None,
 }
 ```
 
@@ -96,6 +97,12 @@ sphinx_examples_as_code_conf = {
   `'>=3.10'`. `None` (default) derives one from the dependencies instead; see
   [Dependencies and run commands](#dependencies-and-run-commands). Only used with
   `script_metadata` on.
+- `export_dir`: a folder that also receives a copy of every sphinx-gallery download, at
+  `<export_dir>/<format>/<folder>/<file>`, e.g.
+  `jupyter/auto_examples/plot_minimal.ipynb` for the page
+  `auto_examples/plot_minimal`. A relative path is relative to the folder holding
+  `conf.py`. `None` (default) exports nothing. Only used with `gallery_downloads` on;
+  docstring Examples downloads are never exported.
 
 An unrecognized key raises a configuration error at build start.
 

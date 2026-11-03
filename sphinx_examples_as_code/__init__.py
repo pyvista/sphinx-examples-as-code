@@ -13,9 +13,11 @@ import hashlib
 import importlib.metadata
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import sys
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
@@ -1684,6 +1686,7 @@ def _process_gallery_page(
     footer: str | None,
     link_labels: dict[str, str],
     script_metadata: dict | None = None,
+    export_dir: str | os.PathLike | None = None,
 ) -> None:
     """Replace a sphinx-gallery page's own download footer with converted downloads.
 
@@ -1730,6 +1733,8 @@ def _process_gallery_page(
     )
     if not entries:
         return
+    if export_dir is not None:
+        _export_gallery_downloads(app, docname, formats, entries, export_dir)
 
     download_node = _make_download_node(entries)
     if position == 'top' and isinstance(first, nodes.section):
@@ -1738,6 +1743,23 @@ def _process_gallery_page(
         first.insert(1, download_node)
     else:
         parent.insert(start if position == 'top' else end, download_node)
+
+
+def _export_gallery_downloads(
+    app: Sphinx,
+    docname: str,
+    formats: list[str],
+    entries: list[tuple[str, str]],
+    export_dir: str | os.PathLike,
+) -> None:
+    """Copy a gallery page's downloads to ``<export_dir>/<format>/<docname's folder>/``."""
+    # Entries come back in _FORMAT_ORDER, one per requested format.
+    written = [fmt for fmt in _FORMAT_ORDER if fmt in formats]
+    folder = Path(app.confdir, export_dir)
+    for fmt, (_label, rel_path) in zip(written, entries, strict=True):
+        out_path = folder / fmt / Path(docname).parent / Path(rel_path).name
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path(app.outdir) / '_downloads' / rel_path, out_path)
 
 
 def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None:
@@ -1764,7 +1786,15 @@ def _process_doctree(app: Sphinx, doctree: nodes.document, docname: str) -> None
 
     if conf['gallery_downloads']:
         _process_gallery_page(
-            app, docname, doctree, position, formats, footer, link_labels, script_metadata
+            app,
+            docname,
+            doctree,
+            position,
+            formats,
+            footer,
+            link_labels,
+            script_metadata,
+            conf['export_dir'],
         )
 
     # Process spans per shared parent, last to first.
@@ -1806,6 +1836,7 @@ _CONF_DEFAULTS: dict[str, object] = {
     'script_metadata': False,
     'dependencies': {},
     'requires_python': None,
+    'export_dir': None,
 }
 
 
@@ -1830,7 +1861,7 @@ def _coerce_conf_value(key: str, value: object) -> object:
             return True
         msg = f"sphinx_examples_as_code_conf[{key!r}] must be '0' or '1', got {value!r}."
         raise ConfigError(msg)
-    return value  # link_position, footer, requires_python: a string is already the real type
+    return value  # link_position, footer, requires_python, export_dir: already the real type
 
 
 def _merged_link_labels(value: object) -> dict[str, str]:
@@ -1920,6 +1951,17 @@ def _validate_requires_python(requires_python: object) -> None:
     raise ConfigError(msg)
 
 
+def _validate_export_dir(export_dir: object) -> None:
+    """Raise a ``ConfigError`` unless ``export_dir`` is ``None`` or a non-empty path."""
+    if export_dir is None or (isinstance(export_dir, (str, os.PathLike)) and str(export_dir)):
+        return
+    msg = (
+        "sphinx_examples_as_code_conf['export_dir'] must be a path such as "
+        f"'_build/examples-as-code', or None, got {export_dir!r}."
+    )
+    raise ConfigError(msg)
+
+
 def _marimo_converter_available() -> bool:
     """Check whether marimo's notebook converter (marimo 0.14 or newer) is importable."""
     try:
@@ -1948,6 +1990,7 @@ def _finalize_conf(_app: Sphinx, config: Config) -> None:
     merged['link_labels'] = _merged_link_labels(merged['link_labels'])
     _validate_dependencies(merged['dependencies'])
     _validate_requires_python(merged['requires_python'])
+    _validate_export_dir(merged['export_dir'])
     _validate_formats(merged['formats'])
     if _FMT_MARIMO in merged['formats'] and not _marimo_converter_available():
         if 'formats' in user_conf:

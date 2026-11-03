@@ -13,11 +13,11 @@ import doctest
 import inspect
 import io
 import json
+from pathlib import Path
 import re
 import subprocess
 import sys
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 from docutils import nodes
@@ -30,9 +30,6 @@ from sphinx_gallery._doctree_links import code_links_block
 from sphinx_gallery.gen_gallery import DEFAULT_GALLERY_CONF
 
 import sphinx_examples_as_code as seac
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _parse(rst: str) -> nodes.document:
@@ -2725,6 +2722,7 @@ def test_process_doctree_gallery_mode_enabled(tmp_path: Path):
         'footer': None,
         'link_labels': seac._DEFAULT_LINK_LABELS,
         'script_metadata': False,
+        'export_dir': None,
     }
 
     doctree = _build_gallery_doctree()
@@ -3526,6 +3524,20 @@ def test_finalize_conf_accepts_requires_python_string():
     config = Mock(sphinx_examples_as_code_conf={'requires_python': '>=3.10'})
     seac._finalize_conf(Mock(), config)
     assert config.sphinx_examples_as_code_conf['requires_python'] == '>=3.10'
+
+
+@pytest.mark.parametrize('export_dir', ['', 1, ['out']])
+def test_finalize_conf_invalid_export_dir_raises(export_dir: object):
+    config = Mock(sphinx_examples_as_code_conf={'export_dir': export_dir})
+    with pytest.raises(ConfigError, match=r"\['export_dir'\] must be a path"):
+        seac._finalize_conf(Mock(), config)
+
+
+@pytest.mark.parametrize('export_dir', ['_build/examples-as-code', Path('out'), None])
+def test_finalize_conf_accepts_export_dir(export_dir: object):
+    config = Mock(sphinx_examples_as_code_conf={'export_dir': export_dir})
+    seac._finalize_conf(Mock(), config)
+    assert config.sphinx_examples_as_code_conf['export_dir'] == export_dir
 
 
 @pytest.fixture
