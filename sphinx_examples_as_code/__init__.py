@@ -1274,7 +1274,7 @@ def _documented_project(project: str | None) -> _DocumentedProject | None:
 _UV_INSTALL_LINE = 'Install uv first: https://docs.astral.sh/uv/getting-started/installation/'
 
 _PYTHON_CLASSIFIER = re.compile(r'Programming Language :: Python :: 3\.(\d+)$')
-# The minor version of the Python building the docs, which ran every example.
+# The minor version of the Python building the docs, which has every dependency installed.
 _BUILD_PYTHON_MINOR = sys.version_info.minor
 
 

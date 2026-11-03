@@ -483,7 +483,9 @@ def test_static_findings_ignore_valid_code(tmp_path: Path):
 def test_static_findings_requires_python(tmp_path: Path, fmt: str):
     def download(spec: str) -> str:
         if fmt == 'jupyter':
-            return _notebook(f'# {seac._jupyter_run_line(["numpy"], spec, "x.ipynb")}')
+            run_line = seac._jupyter_run_line(['numpy'], spec, 'x.ipynb')
+            cells = seac._segments_to_cells([('text', [f'# {run_line}']), ('code', ['x'])])
+            return json.dumps(seac._build_notebook(cells))
         return seac._script_metadata_header([], spec, 'run')
 
     path = tmp_path / 'x'

@@ -141,13 +141,14 @@ pre-release or dev build.
 Unless `requires_python` is set, the block's `requires-python` combines:
 
 - that project's own `Requires-Python`, e.g. `>=3.10`, when it is listed;
-- `<3.N`, when the download depends on that project, or on any dependency, listed or left
-  out, installed from a wheel built for one Python version's ABI, e.g. `cp314-cp314`, in the
-  environment building the docs. `N` is one minor version above the Python building the docs,
-  or above the oldest of the newest Pythons their `Programming Language :: Python :: 3.X`
-  classifiers name, whichever is newer. Dependencies whose wheels carry the `none` or stable
-  `abi3` ABI tag don't count, and the bound is dropped when it would exclude every Python the
-  project's own `Requires-Python` allows.
+- `<3.N`, when the download depends on that project, or on any other dependency, listed or
+  left out, installed from a wheel built for one Python version's ABI, e.g. `cp314-cp314`, in
+  the environment building the docs. `N` is one minor version above the Python building the
+  docs, or above the oldest of the newest Pythons their `Programming Language :: Python :: 3.X`
+  classifiers name, whichever is newer; one naming no `3.X` doesn't count toward that oldest.
+  Dependencies whose wheels carry the `none` or stable `abi3` ABI tag don't count, and the
+  bound is dropped when it would exclude every Python the project's own `Requires-Python`
+  allows.
 
 With neither, the line is left out.
 
