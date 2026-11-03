@@ -5,7 +5,7 @@ on:
   workflow_call:
     inputs:
       artifact:
-        description: Name of the artifact holding the built HTML.
+        description: Name of the artifact holding the built HTML, or that `build` uploads.
         required: true
         type: string
       install:
@@ -21,6 +21,13 @@ on:
           calling repository.
         type: string
         default: ''
+      build:
+        description: >-
+          Shell command run after `install` that builds the docs with this workflow's commit of
+          the extension, instead of downloading an artifact; `html-path` is then the folder of the
+          checkout it writes the HTML to, and `run-id` and `docs-workflow` are unused.
+        type: string
+        default: ''
       run-id:
         description: Run that uploaded the artifact; empty to use the newest successful `docs-workflow` run on the default branch that still has it.
         type: string
@@ -30,7 +37,7 @@ on:
         type: string
         default: docs.yml
       html-path:
-        description: Folder inside the artifact that holds the HTML and `_downloads`.
+        description: Folder inside the artifact, or of the checkout with `build`, that holds the HTML and `_downloads`.
         type: string
         default: .
       link-position:
@@ -58,7 +65,7 @@ on:
         type: string
         default: '3.14'
       runs-on:
-        description: Runner of the audit jobs.
+        description: Runner of the build and audit jobs.
         type: string
         default: ubuntu-latest
       headless-display:
@@ -66,7 +73,7 @@ on:
         type: boolean
         default: false
       timeout-minutes:
-        description: Time limit of each audit job.
+        description: Time limit of the build job and of each audit job.
         type: number
         default: 360
       exclude:
@@ -91,6 +98,7 @@ permissions: {}
 jobs:
   find-build:
     name: Find the docs build
+    if: inputs.build == ''
     runs-on: ubuntu-latest
     permissions:
       actions: read # to list runs and their artifacts
@@ -133,9 +141,79 @@ jobs:
         echo "::error::no run has an unexpired ${ARTIFACT} artifact"
         exit 1
 
+  build:
+    name: Build the docs
+    if: inputs.build != ''
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      with:
+        repository: ${{ inputs.repository || github.repository }}
+        persist-credentials: false
+
+    - name: Record the commit
+      id: sha
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        activate-environment: true
+        enable-cache: false
+
+    - name: Set up headless display
+      if: inputs.headless-display
+      uses: pyvista/setup-headless-display-action@10e6efb97af3cd1523828f0e22c39f0e4567f3e4   # v5.2.0
+      with:
+        pyvista: true
+
+    - name: Restore the cache
+      if: inputs.cache-key != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+      with:
+        path: ${{ inputs.cache-path }}
+        key: ${{ inputs.cache-key }}
+        enableCrossOsArchive: true
+        fail-on-cache-miss: true
+
+    - name: Set up
+      if: inputs.setup != ''
+      env:
+        SETUP: ${{ inputs.setup }}
+      run: bash -euo pipefail -c "$SETUP"
+
+    - name: Install the documentation environment
+      env:
+        INSTALL: ${{ inputs.install }}
+      run: bash -euo pipefail -c "$INSTALL"
+
+    - name: Install this workflow's commit of the extension
+      env:
+        SEAC: sphinx-examples-as-code @ git+https://github.com/${{ job.workflow_repository }}@${{ job.workflow_sha }}
+      run: uv pip install "$SEAC"
+
+    - name: Build the docs
+      env:
+        BUILD: ${{ inputs.build }}
+      run: bash -euo pipefail -c "$BUILD"
+
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+      with:
+        name: ${{ inputs.artifact }}
+        path: |
+          ${{ inputs.html-path }}/**/*.html
+          ${{ inputs.html-path }}/_downloads/
+        if-no-files-found: error
+
   audit:
     name: Audit ${{ matrix.format }} downloads
-    needs: find-build
+    needs: [find-build, build]
+    if: ${{ !cancelled() && (needs.find-build.result == 'success' || needs.build.result == 'success') }}
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -193,14 +271,14 @@ jobs:
       with:
         name: ${{ inputs.artifact }}
         path: docs-artifact
-        run-id: ${{ needs.find-build.outputs.run-id }}
-        repository: ${{ inputs.repository || github.repository }}
+        run-id: ${{ needs.find-build.outputs.run-id || github.run_id }}
+        repository: ${{ inputs.build == '' && inputs.repository || github.repository }}
         github-token: ${{ github.token }}
 
     - name: Run the ${{ matrix.format }} downloads
       env:
         FORMAT: ${{ matrix.format }}
-        HTML: docs-artifact/${{ inputs.html-path }}
+        HTML: docs-artifact/${{ inputs.build == '' && inputs.html-path || '.' }}
         EXCLUDE: ${{ inputs.exclude }}
         LINK_POSITION: ${{ inputs.link-position }}
       # shellcheck disable=SC2086 # EXCLUDE is a list of words, kept unexpanded by set -f
@@ -212,7 +290,7 @@ jobs:
     - name: Find download links missing a format
       if: strategy.job-index == 0
       env:
-        HTML: docs-artifact/${{ inputs.html-path }}
+        HTML: docs-artifact/${{ inputs.build == '' && inputs.html-path || '.' }}
       run: python -m sphinx_examples_as_code.audit pages "$HTML" --output results-pages.jsonl
 
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
@@ -223,8 +301,8 @@ jobs:
 
   report:
     name: Report
-    needs: [find-build, audit]
-    if: ${{ !cancelled() && needs.find-build.result == 'success' }}
+    needs: [find-build, build, audit]
+    if: ${{ !cancelled() && (needs.find-build.result == 'success' || needs.build.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       issues: write # to file the report
@@ -262,8 +340,9 @@ jobs:
         GH_REPO: ${{ github.repository }}
         LABEL: ${{ inputs.issue-label }}
         AUDIT_RESULT: ${{ needs.audit.result }}
-        DOCS_RUN_URL: ${{ github.server_url }}/${{ inputs.repository || github.repository }}/actions/runs/${{ needs.find-build.outputs.run-id }}
-        DOCS_SHA: ${{ needs.find-build.outputs.sha }}
+        DOCS_REPO: ${{ inputs.build == '' && inputs.repository || github.repository }}
+        DOCS_RUN_ID: ${{ needs.find-build.outputs.run-id || github.run_id }}
+        DOCS_SHA: ${{ needs.find-build.outputs.sha || needs.build.outputs.sha }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
         if [ "$GITHUB_REF_NAME" != "$(gh api "repos/${GH_REPO}" --jq .default_branch)" ]; then
@@ -277,7 +356,7 @@ jobs:
         fi
         # Stay under GitHub's 65536 character limit for an issue body.
         body=$(printf '### Example download audit\n\n**Run:** %s\n**Docs build:** %s at `%s`\n\n%s\n\n%s\n' \
-          "$RUN_URL" "$DOCS_RUN_URL" "${DOCS_SHA:0:8}" "$note" "$(head -c 60000 report.md)")
+          "$RUN_URL" "${GITHUB_SERVER_URL}/${DOCS_REPO}/actions/runs/${DOCS_RUN_ID}" "${DOCS_SHA:0:8}" "$note" "$(head -c 60000 report.md)")
         existing=$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')
         if [ -n "$existing" ]; then
           gh issue comment "$existing" --body "$body"

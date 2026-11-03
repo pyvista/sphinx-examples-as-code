@@ -1,6 +1,6 @@
 name: Audit PyVista downloads
 
-# Runs every example download of PyVista's latest main docs build and files an issue on failure.
+# Builds PyVista's main docs with this commit, runs every example download and files an issue on failure.
 on:
   workflow_dispatch:
   schedule:
@@ -32,15 +32,23 @@ jobs:
       issues: write  # to file the report
     with:
       repository: pyvista/pyvista
-      artifact: docs-build-light
+      artifact: docs-build-audit
       formats: '["python", "jupyter"]'  # marimo once PyVista's docs ship marimo downloads
       runs-on: ubuntu-22.04
       headless-display: true
       cache-path: pyvista-data
       cache-key: ${{ needs.cache-pyvista-data.outputs.key }}
-      setup: |  # the docs build's theme
-        echo "PYVISTA_DATA=$GITHUB_WORKSPACE/pyvista-data" >> "$GITHUB_ENV"
-        echo "PYVISTA_PLOT_THEME=document_build" >> "$GITHUB_ENV"
+      setup: |  # the docs build's environment
+        {
+          echo "PYVISTA_DATA=$GITHUB_WORKSPACE/pyvista-data"
+          echo "PYVISTA_PLOT_THEME=document_build"
+          echo "PYVISTA_OFF_SCREEN=true"
+          echo "ALLOW_PLOTTING=true"
+        } >> "$GITHUB_ENV"
       install: uv pip install . --group docs
+      build: |  # tox's docs-build without -W
+        (cd doc/source && python make_tables.py -j auto && python make_external_gallery.py)
+        cd doc && python -m sphinx -M html source _build -j auto
+      html-path: doc/_build/html
       exclude: '*delete_downloads*'
       issue-label: docs-download-failure

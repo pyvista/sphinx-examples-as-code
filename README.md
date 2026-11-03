@@ -308,7 +308,8 @@ The reusable workflow `.github/workflows/audit-downloads.yml` runs this on a doc
 of the calling repository, or of `repository`, one job per format, and can file the report as
 an issue. Each job runs `install` in a checkout of the docs repository, at the calling
 workflow's ref when `repository` is empty and at its default branch otherwise, then installs
-the audit from the workflow's own commit:
+the audit from the workflow's own commit. With `build`, a job first builds the docs in that
+checkout with the extension at the workflow's own commit, and the audit runs that build:
 
 ```yaml
 jobs:
