@@ -555,13 +555,17 @@ def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caps
         monkeypatch.setattr(runner.Guard, name, set())
     for name in ('providers', 'hidden', 'seen'):
         monkeypatch.setattr(runner.Guard, name, {})
+    monkeypatch.setattr(runner.Guard, 'direct', set())
     assert runner.main() == int(hide)
     records = [{'line': 6, 'stdout': 'a\n'}, {'line': 7, 'stdout': ''}, {'line': 8, 'stdout': ''}]
     records.append({'line': 9, 'stdout': '1\n'})
-    assert json.loads(output.read_text())[:4] == records
+    if not hide:
+        records.append({'line': 10, 'stdout': ''})
+    assert json.loads(output.read_text()) == records
     err = capsys.readouterr().err
     assert (f"{runner.BLOCKED} of 'pytest' from pytest" in err) is hide
-    assert audit.undeclared(err)[1] == ({} if hide else {'pytest': 'pytest'})
+    seen = {} if hide else {'pytest': 'pytest'}
+    assert audit.undeclared(err)[1:] == (seen, set(seen))
 
 
 def test_runner_baseline(monkeypatch: pytest.MonkeyPatch, capsys):
@@ -573,7 +577,10 @@ def test_runner_baseline(monkeypatch: pytest.MonkeyPatch, capsys):
     monkeypatch.setattr(runner.importlib.metadata, 'packages_distributions', lambda: providers)
     real_import = __import__
 
+    asked = []
+
     def fake_import(name, *args, **kwargs):
+        asked.append(name)
         if name == 'seac_fake_mod':
             return real_import('pytest')
         if name == 'seac_broken':
@@ -582,7 +589,8 @@ def test_runner_baseline(monkeypatch: pytest.MonkeyPatch, capsys):
 
     monkeypatch.setattr('builtins.__import__', fake_import)
     assert runner.main() == 0
-    assert audit.undeclared(capsys.readouterr().err)[1] == {'pytest': 'pytest'}
+    assert 'pytest' not in asked
+    assert audit.undeclared(capsys.readouterr().err)[1:] == ({'pytest': 'pytest'}, set())
 
 
 class _Everything:
@@ -593,11 +601,35 @@ class _Everything:
         return True
 
 
-def test_baseline_suspects_are_not_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize(('known', 'kinds'), [(True, []), (False, ['dependency'])])
+def test_library_lookups_the_baseline_explains_are_not_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, known: bool, kinds: list[str]
+):
     path = tmp_path / 's.py'
-    path.write_text(HEADER + TRY_PYTEST + '    raise ValueError\n')
+    library = "exec(compile('import pytest', 'library.py', 'exec'))"
+    path.write_text(HEADER + f'try:\n    {library}\nexcept ImportError:\n    raise ValueError\n')
+    if known:
+        monkeypatch.setattr(audit, 'baseline', lambda deps, timeout: _Everything())
+    assert _kinds(audit.execute(path, 'python', 60, [])) == kinds
+
+
+def test_direct_import_is_a_suspect_despite_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / 's.py'
+    path.write_text(HEADER + 'import pytest\nprint("x", end="")\n')
     monkeypatch.setattr(audit, 'baseline', lambda deps, timeout: _Everything())
-    assert audit.execute(path, 'python', 60, [])['findings'] == []
+    findings = audit.execute(path, 'python', 60, [])['findings']
+    assert findings == [{'kind': 'dependency', 'message': "'pytest' from pytest"}]
+
+
+def test_values_come_from_the_first_run(tmp_path: Path):
+    path = tmp_path / 's.py'
+    path.write_text(HEADER + TRY_PYTEST + '    x = 2\nelse:\n    x = 1\nprint(repr(x))\n')
+    expected = [audit.Expected('x', '1')]
+    result = audit.execute(path, 'python', 60, expected)
+    assert result['findings'] == []
+    assert result['compared'] == 1
 
 
 def test_baseline_and_rerun_time_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -610,7 +642,7 @@ def test_baseline_and_rerun_time_out(tmp_path: Path, monkeypatch: pytest.MonkeyP
     path.write_text(HEADER)
     monkeypatch.setattr(audit, 'baseline', lambda deps, timeout: frozenset())
     seen = {'pytest': 'pytest'}
-    finding = audit.dependency_finding(path, [], seen, passed=True, tmp=str(tmp_path), timeout=1)
+    finding = audit.dependency_finding(path, seen, set(), passed=True, tmp=str(tmp_path), timeout=1)
     assert finding is None
 
 

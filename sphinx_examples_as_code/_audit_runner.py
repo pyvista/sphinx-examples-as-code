@@ -1,6 +1,7 @@
 """Run a script by statement, recording each one's stdout and allowing only its dependencies.
 
-Usage: ``python _audit_runner.py SCRIPT OUTPUT_JSON``, by path so the package is not imported.
+Usage: ``python _audit_runner.py SCRIPT OUTPUT_JSON [--hide MODULES]`` or
+``python _audit_runner.py --baseline DEPENDENCY...``, by path so the package is not imported.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import contextlib
 import importlib.machinery
 import importlib.metadata
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -31,6 +33,8 @@ METADATA = re.compile(r'(?m)^# /// script$\s(?P<content>(^#(| .*)$\s)+)^# ///$')
 BLOCKED = 'sphinx-examples-as-code-audit: blocked import'
 # Printed to stderr before the JSON of the undeclared modules a run looked up.
 UNDECLARED = 'sphinx-examples-as-code-audit: undeclared modules'
+# Filenames of the frames between an import and the code asking for it.
+IMPORT_MACHINERY = ('<frozen importlib', f'{Path(importlib.machinery.__file__).parent}{os.sep}')
 
 
 def script_metadata(source: str) -> dict[str, Any] | None:
@@ -80,6 +84,8 @@ class Guard(importlib.machinery.PathFinder):
     providers: ClassVar[dict[str, list[str]]] = {}
     hidden: ClassVar[dict[str, str]] = {}
     seen: ClassVar[dict[str, str]] = {}
+    direct: ClassVar[set[str]] = set()
+    script: ClassVar[str | None] = None
 
     @classmethod
     def find_spec(cls, fullname, path=None, target=None):
@@ -93,13 +99,25 @@ class Guard(importlib.machinery.PathFinder):
                 spec = super().find_spec(fullname, path, target)
                 if spec is not None:
                     cls.seen[fullname] = ', '.join(sorted(dists))
+                    if cls.from_script():
+                        cls.direct.add(fullname)
                 return spec
         return super().find_spec(fullname, path, target)
 
     @classmethod
-    def install(cls, allowed: set[str], hide: set[str] = frozenset()) -> None:
+    def from_script(cls) -> bool:
+        """Check whether the code asking for a module, past the importlib frames, is the script."""
+        frame = sys._getframe(2)
+        while frame is not None and frame.f_code.co_filename.startswith(IMPORT_MACHINERY):
+            frame = frame.f_back
+        return frame is not None and frame.f_code.co_filename == cls.script
+
+    @classmethod
+    def install(
+        cls, allowed: set[str], hide: Iterable[str] = (), script: str | None = None
+    ) -> None:
         """Replace the path finder with this one and unload the runner's own undeclared imports."""
-        cls.allowed, cls.hide = allowed, set(hide)
+        cls.allowed, cls.hide, cls.script = allowed, set(hide), script
         cls.providers = importlib.metadata.packages_distributions()
         sys.meta_path[sys.meta_path.index(importlib.machinery.PathFinder)] = cls
         if 'packaging' not in allowed:
@@ -162,7 +180,8 @@ class Tee:
 
 def report_undeclared() -> None:
     """Print the undeclared modules this run looked up."""
-    print(f'{UNDECLARED} {json.dumps(Guard.seen)}', file=sys.stderr)
+    report = {'modules': Guard.seen, 'direct': sorted(Guard.direct)}
+    print(f'{UNDECLARED} {json.dumps(report)}', file=sys.stderr)
 
 
 def baseline(deps: list[str]) -> int:
@@ -186,7 +205,7 @@ def main() -> int:
     source = script.read_text(encoding='utf-8')
     deps = declared_dependencies(source)
     if deps is not None:
-        Guard.install(closure(deps), hide)
+        Guard.install(closure(deps), hide, str(script))
     sys.argv = [str(script)]
     sys.path[0] = str(script.parent)
     namespace = {'__name__': '__main__', '__file__': str(script), '__builtins__': __builtins__}

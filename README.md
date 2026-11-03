@@ -292,9 +292,10 @@ With `--html`, only downloads a page links to are run. Each finding has a kind:
 | `no-downloads` | No download of the format exists at all |
 
 - Scripts run one top-level statement at a time. When a script looks up a module that
-  only distributions outside the `dependencies` of its inline metadata provide, and
-  importing those dependencies alone does not, the script runs again with that module
-  hidden, as in the environment `uv run` builds, and fails the check if it then fails.
+  only distributions outside the `dependencies` of its inline metadata provide, either
+  itself or through a library where importing those dependencies alone does not, the script
+  runs again with that module hidden, as in the environment `uv run` builds, and fails the
+  check if it then fails. Notebooks are not checked for dependencies.
 - Downloads run in the current environment and user account. Pass `--exclude` with glob
   patterns of example names to skip any that delete or overwrite files, e.g. a cache.
 - Expected outputs come from the doctest blocks of each download's example, compared with

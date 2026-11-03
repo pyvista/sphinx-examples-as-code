@@ -38,7 +38,7 @@ jobs:
       headless-display: true
       cache-path: pyvista-data
       cache-key: ${{ needs.cache-pyvista-data.outputs.key }}
-      setup: |  # the docs build's theme, which resamples environment textures
+      setup: |  # the docs build's theme
         echo "PYVISTA_DATA=$GITHUB_WORKSPACE/pyvista-data" >> "$GITHUB_ENV"
         echo "PYVISTA_PLOT_THEME=document_build" >> "$GITHUB_ENV"
       install: uv pip install . --group docs

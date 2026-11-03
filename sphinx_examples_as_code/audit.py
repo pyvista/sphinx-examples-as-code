@@ -439,15 +439,17 @@ def commands(path: Path, fmt: str, tmp: str) -> list[tuple[str, list[str]]]:
     ]
 
 
-def undeclared(output: str) -> tuple[str, dict[str, str]]:
-    """Split the runner's undeclared-module report off ``output``."""
-    lines, seen = [], {}
-    for line in output.splitlines(keepends=True):
+def undeclared(stderr: str) -> tuple[str, dict[str, str], set[str]]:
+    """Split the runner's undeclared-module report off ``stderr``, with the script's own lookups."""
+    lines, seen, direct = [], {}, set()
+    for line in stderr.splitlines(keepends=True):
         if line.startswith(UNDECLARED):
-            seen.update(json.loads(line.removeprefix(UNDECLARED)))
+            report = json.loads(line.removeprefix(UNDECLARED))
+            seen.update(report['modules'])
+            direct.update(report['direct'])
         else:
             lines.append(line)
-    return ''.join(lines), seen
+    return ''.join(lines), seen, direct
 
 
 @functools.cache
@@ -466,17 +468,25 @@ def baseline(deps: tuple[str, ...], timeout: float) -> frozenset[str]:
 
 
 def dependency_finding(
-    path: Path, cmd: list[str], seen: dict[str, str], *, passed: bool, tmp: str, timeout: float
+    path: Path,
+    seen: dict[str, str],
+    direct: set[str],
+    *,
+    passed: bool,
+    tmp: str,
+    timeout: float,
 ) -> dict | None:
     """Rerun a script with its undeclared modules hidden, and report them if it then fails."""
     deps = declared_dependencies(path.read_text(encoding='utf-8')) or []
-    suspects = {m: d for m, d in seen.items() if m not in baseline(tuple(deps), timeout)}
+    known = baseline(tuple(deps), timeout)
+    suspects = {m: d for m, d in seen.items() if m in direct or m not in known}
     if not suspects:
         return None
     env = {**os.environ, **ENV}
+    hide = ['--hide', ','.join(sorted(suspects))]
     try:
         proc = subprocess.run(
-            [*cmd, '--hide', ','.join(sorted(suspects))],
+            [sys.executable, str(RUNNER), str(path), f'{tmp}/hidden.json', *hide],
             cwd=tmp,
             env=env,
             capture_output=True,
@@ -540,7 +550,8 @@ def execute(path: Path, fmt: str, timeout: float, expected: list[Expected]) -> d
                     timeout=timeout,
                     check=False,
                 )
-                code, output = proc.returncode, proc.stdout + proc.stderr
+                stderr, seen, direct = undeclared(proc.stderr)
+                code, output = proc.returncode, proc.stdout + stderr
             except subprocess.TimeoutExpired:
                 findings.append({'kind': 'timeout', 'message': f'{stage} after {timeout:g} s'})
                 break
@@ -551,13 +562,11 @@ def execute(path: Path, fmt: str, timeout: float, expected: list[Expected]) -> d
             executed = Path(tmp) / 'executed.ipynb'
             if fmt != 'python':
                 output = notebook_error(executed) or (output if code else '')
-            else:
-                output, seen = undeclared(output)
             if code or (output and fmt != 'python'):
                 findings.append(error_finding(fmt, output))
             if fmt == 'python' and seen:
                 dependency = dependency_finding(
-                    copy, cmd, seen, passed=not code, tmp=tmp, timeout=timeout
+                    copy, seen, direct, passed=not code, tmp=tmp, timeout=timeout
                 )
                 if dependency:
                     findings.append(dependency)

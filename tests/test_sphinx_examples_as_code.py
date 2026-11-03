@@ -402,6 +402,15 @@ def test_convert_doctest_source_skip_among_flags(flags: str):
     assert segments == [('code', ['# f()'])]
 
 
+@pytest.mark.parametrize(
+    'line',
+    ['>>> f()  # doctest: -SKIP', '>>> f()  # doctest: +SKIP -SKIP', '>>> s = "# doctest: +SKIP"'],
+)
+def test_convert_doctest_source_not_skipped(line: str):
+    code = line.removeprefix('>>> ').split('  # doctest')[0]
+    assert seac._convert_doctest_source(line) == [('code', [code])]
+
+
 def test_convert_doctest_source_skip_only_its_example():
     segments = seac._convert_doctest_source('>>> f()  # doctest: +SKIP\n>>> g()\n1')
     assert segments == [('code', ['# f()', 'g()']), ('end', [])]
@@ -424,11 +433,20 @@ def test_keep_doctest_flags_reads_untrimmed_source():
     code = nodes.literal_block('h()', 'h()')
     document = publish_doctree('')
     document += [doctest_node, console, code]
+    empty = nodes.doctest_block('', '>>> e()')
+    document += empty
     seac._KeepDoctestFlags(document).run()
     console[:] = [nodes.Text('>>> g()')]
+    assert seac._DOCTEST_SOURCE_ATTR not in empty
     assert seac._convert_doctest_block(doctest_node) == [('code', ['# f()'])]
     assert seac._doctest_source(console) == '>>> g()  # doctest: +SKIP'
     assert seac._DOCTEST_SOURCE_ATTR not in code
+
+
+def test_non_python_block_keeps_trimmed_text():
+    node = nodes.literal_block('>>> f()  # doctest: +SKIP', '>>> f()', language='pycon')
+    node[seac._DOCTEST_SOURCE_ATTR] = node.rawsource
+    assert seac._convert_literal_block(node) == [('directive', ['# >>> f()'])]
 
 
 def test_convert_doctest_blocks_split_after_output():

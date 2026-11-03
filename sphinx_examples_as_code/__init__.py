@@ -381,7 +381,8 @@ class _KeepDoctestFlags(SphinxPostTransform):
             if node.rawsource == node.astext() and node.rawsource.lstrip().startswith('>>>'):
                 node[_DOCTEST_SOURCE_ATTR] = node.rawsource
         for node in self.document.findall(nodes.doctest_block):
-            node[_DOCTEST_SOURCE_ATTR] = node.rawsource
+            if node.rawsource:
+                node[_DOCTEST_SOURCE_ATTR] = node.rawsource
 
 
 def _doctest_rows(source: str) -> list[tuple[str, str, bool]]:
@@ -411,7 +412,8 @@ def _doctest_rows(source: str) -> list[tuple[str, str, bool]]:
             continue
         example = [r for r in rows[start:i] if r[0] in ('prompt', 'continuation')]
         flags = [m[1] for r in example if (m := _DOCTEST_FLAGS.search(r[1]))]
-        skipped = any('+SKIP' in re.split(r'[\s,]+', f) for f in flags)
+        tokens = [t for f in flags for t in re.split(r'[\s,]+', f) if t in ('+SKIP', '-SKIP')]
+        skipped = tokens[-1:] == ['+SKIP']
         for r in example:
             r[1] = _DOCTEST_FLAGS.sub('', r[1])
             r[2] = skipped
@@ -518,7 +520,8 @@ def _convert_literal_block(node: nodes.Element, *, print_output: bool = False) -
     if _is_gallery_code_block(node):
         language, source = node.get('lang', ''), _gallery_code_block_source(node)
     else:
-        language, source = node.get('language', ''), _doctest_source(node)
+        language = node.get('language', '')
+        source = _doctest_source(node) if language.lower() in _PYTHON_LANGUAGES else node.astext()
     # Case-insensitive: sphinx-gallery emits ``.. code-block:: Python`` (capitalized).
     if language.lower() in _PYTHON_LANGUAGES:
         if source.lstrip().startswith('>>>'):
