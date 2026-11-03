@@ -443,9 +443,58 @@ def test_json_repr(value: object, shown: str | None):
 
 def test_expectations_skip_blocks_before_any_link(tmp_path: Path):
     page = '<div class="highlight-pycon"><div class="highlight"><pre>&gt;&gt;&gt; 1\n1\n</pre>'
-    page += _page({'a/x.py': '>>> import os\n>>> 2\n2\n'})
+    page += _page({'a/x.py': '>>> import os\n>>> # os.sep\n>>> 2\n2\n'})
     (tmp_path / 'p.html').write_text(page)
-    assert audit.expectations(tmp_path) == {'a/x.py': ('p.html#0', [audit.Expected('2\n', '2\n')])}
+    examples = [
+        audit.Expected('import os\n', ''),
+        audit.Expected('# os.sep\n', ''),
+        audit.Expected('2\n', '2\n'),
+    ]
+    assert audit.expectations(tmp_path) == {'a/x.py': ('p.html#0', examples)}
+
+
+def test_expectations_restore_blanklines(tmp_path: Path):
+    page = _page({'a/x.py': '>>> x\na\n\nb\n>>> y\n1\n\n>>> z\n2\n\n'})
+    (tmp_path / 'p.html').write_text(page)
+    [_, examples] = audit.expectations(tmp_path)['a/x.py']
+    assert [ex.want for ex in examples] == ['a\n<BLANKLINE>\nb\n', '1\n', '2\n']
+    assert audit.same_output(examples[0].want, 'a\n\nb\n')
+    script = 'def f():\n    """\n    >>> f()\n    1\n\n    """\n\n\nx = 1\n'
+    assert audit.restore_blanklines(script) == script
+    indented = '  >>> x\n  a\n\n  b\n'
+    assert audit.restore_blanklines(indented) == '  >>> x\n  a\n  <BLANKLINE>\n  b\n'
+    outdented = '  >>> x\n  1\n\nnote\n'
+    assert audit.restore_blanklines(outdented) == outdented
+
+
+def test_commented_statements():
+    source = '# Some prose.\n# f(\n#     a,\n# )\nx = 1\n# %%\n#\n'
+    [node] = audit.commented_statements(source)
+    assert ast.unparse(node) == 'f(a)'
+    assert node.lineno == 2
+    assert audit.is_skipped(node)
+    assert [audit.is_skipped(n) for n in audit.with_skipped(source)] == [True, False]
+    assert audit.with_skipped('x +') is None
+
+
+def test_skipped_statements_are_not_compared(tmp_path: Path):
+    expected = [audit.Expected('x\n', '1\n'), audit.Expected('x\n', '2\n')]
+    script = tmp_path / 'x.py'
+    script.write_text('x = 2\n# x\nprint(repr((x)))\n')
+    units = audit.python_units(script, [{'line': 3, 'stdout': '2\n'}])
+    assert audit.compare(expected, units, 'python') == ([], 1)
+    commented = [audit.Expected('# x\n', ''), audit.Expected('x\n', '2\n')]
+    assert audit.compare(commented, units, 'python') == ([], 1)
+    quiet = [audit.Expected('x\n', ''), audit.Expected('x\n', '3\n')]
+    [finding], compared = audit.compare(quiet, units, 'python')
+    assert (finding['kind'], compared) == ('mismatch', 1)
+    notebook = json.loads(_notebook('x = 2\n# x', 'x\n# y'))
+    notebook['cells'][1]['outputs'] = [
+        {'output_type': 'execute_result', 'data': {'text/plain': ['2']}, 'metadata': {}}
+    ]
+    path = tmp_path / 'x.ipynb'
+    path.write_text(json.dumps(notebook))
+    assert audit.compare(expected, audit.notebook_units(path), 'jupyter') == ([], 1)
 
 
 def test_page_groups_bottom_links():
