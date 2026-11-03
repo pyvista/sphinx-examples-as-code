@@ -13,6 +13,7 @@ from concurrent.futures import as_completed
 from dataclasses import dataclass
 import doctest
 import fnmatch
+import functools
 import html
 import json
 import os
@@ -25,11 +26,15 @@ import tempfile
 import time
 
 from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
 
 from . import _FORMAT_ORDER as FORMATS
 from . import _GALLERY_TIMING_CLASS as GALLERY_PAGE
 from . import _SUFFIXES as SUFFIXES
 from ._audit_runner import BLOCKED
+from ._audit_runner import UNDECLARED
+from ._audit_runner import closure
+from ._audit_runner import declared_dependencies
 from ._audit_runner import script_metadata
 
 RUNNER = Path(__file__).with_name('_audit_runner.py')
@@ -434,6 +439,77 @@ def commands(path: Path, fmt: str, tmp: str) -> list[tuple[str, list[str]]]:
     ]
 
 
+def undeclared(output: str) -> tuple[str, dict[str, str]]:
+    """Split the runner's undeclared-module report off ``output``."""
+    lines, seen = [], {}
+    for line in output.splitlines(keepends=True):
+        if line.startswith(UNDECLARED):
+            seen.update(json.loads(line.removeprefix(UNDECLARED)))
+        else:
+            lines.append(line)
+    return ''.join(lines), seen
+
+
+@functools.cache
+def baseline(deps: tuple[str, ...], timeout: float) -> frozenset[str]:
+    """Return the undeclared modules that importing ``deps`` alone looks up."""
+    with tempfile.TemporaryDirectory(prefix='seac-audit-') as tmp:
+        cmd = [sys.executable, str(RUNNER), '--baseline', *deps]
+        env = {**os.environ, **ENV}
+        try:
+            proc = subprocess.run(
+                cmd, cwd=tmp, env=env, capture_output=True, text=True, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired:
+            return frozenset()
+    return frozenset(undeclared(proc.stderr)[1])
+
+
+def dependency_finding(
+    path: Path, cmd: list[str], seen: dict[str, str], *, passed: bool, tmp: str, timeout: float
+) -> dict | None:
+    """Rerun a script with its undeclared modules hidden, and report them if it then fails."""
+    deps = declared_dependencies(path.read_text(encoding='utf-8')) or []
+    suspects = {m: d for m, d in seen.items() if m not in baseline(tuple(deps), timeout)}
+    if not suspects:
+        return None
+    env = {**os.environ, **ENV}
+    try:
+        proc = subprocess.run(
+            [*cmd, '--hide', ','.join(sorted(suspects))],
+            cwd=tmp,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    output = proc.stdout + proc.stderr
+    if proc.returncode == 0 or not (passed or BLOCKED in output):
+        return None
+    if BLOCKED in output:
+        return error_finding('python', output)
+    return {'kind': 'dependency', 'message': suspect_message(suspects)}
+
+
+def suspect_message(suspects: dict[str, str]) -> str:
+    """Name one module of each suspect distribution that no other suspect requires."""
+    by_dist: dict[str, list[str]] = defaultdict(list)
+    for module, dists in sorted(suspects.items()):
+        by_dist[dists].append(module)
+    names = {dist for dists in by_dist for dist in dists.split(', ')}
+    parts = []
+    for dists, modules in by_dist.items():
+        own = set(dists.split(', '))
+        if own & closure(sorted(names - own)):
+            continue
+        public = [m for m in modules if canonicalize_name(m) in own] or modules
+        parts.append(f'{public[0]!r} from {dists}')
+    return '; '.join(parts)
+
+
 def error_finding(fmt: str, output: str) -> dict:
     """Classify a failed run by its output."""
     if BLOCKED in output:
@@ -475,8 +551,16 @@ def execute(path: Path, fmt: str, timeout: float, expected: list[Expected]) -> d
             executed = Path(tmp) / 'executed.ipynb'
             if fmt != 'python':
                 output = notebook_error(executed) or (output if code else '')
+            else:
+                output, seen = undeclared(output)
             if code or (output and fmt != 'python'):
                 findings.append(error_finding(fmt, output))
+            if fmt == 'python' and seen:
+                dependency = dependency_finding(
+                    copy, cmd, seen, passed=not code, tmp=tmp, timeout=timeout
+                )
+                if dependency:
+                    findings.append(dependency)
             if fmt == 'python':
                 records_file = Path(tmp) / 'stdout.json'
                 records = json.loads(records_file.read_text()) if records_file.exists() else []

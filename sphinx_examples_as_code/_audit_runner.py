@@ -6,6 +6,7 @@ Usage: ``python _audit_runner.py SCRIPT OUTPUT_JSON``, by path so the package is
 from __future__ import annotations
 
 import ast
+import contextlib
 import importlib.machinery
 import importlib.metadata
 import json
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
 METADATA = re.compile(r'(?m)^# /// script$\s(?P<content>(^#(| .*)$\s)+)^# ///$')
 # Printed to stderr for each import the dependencies do not cover.
 BLOCKED = 'sphinx-examples-as-code-audit: blocked import'
+# Printed to stderr before the JSON of the undeclared modules a run looked up.
+UNDECLARED = 'sphinx-examples-as-code-audit: undeclared modules'
 
 
 def script_metadata(source: str) -> dict[str, Any] | None:
@@ -70,11 +73,13 @@ def closure(requirements: list[str]) -> set[str]:
 
 
 class Guard(importlib.machinery.PathFinder):
-    """Hide top-level modules that only undeclared distributions provide."""
+    """Record top-level modules that only undeclared distributions provide, hiding ``hide``."""
 
     allowed: ClassVar[set[str]] = set()
+    hide: ClassVar[set[str]] = set()
     providers: ClassVar[dict[str, list[str]]] = {}
     hidden: ClassVar[dict[str, str]] = {}
+    seen: ClassVar[dict[str, str]] = {}
 
     @classmethod
     def find_spec(cls, fullname, path=None, target=None):
@@ -82,14 +87,19 @@ class Guard(importlib.machinery.PathFinder):
         if path is None and fullname not in sys.stdlib_module_names:
             dists = {canonicalize_name(d) for d in cls.providers.get(fullname, [])}
             if dists and not dists & cls.allowed:
-                cls.hidden[fullname] = ', '.join(sorted(dists))
-                return None
+                if fullname in cls.hide:
+                    cls.hidden[fullname] = ', '.join(sorted(dists))
+                    return None
+                spec = super().find_spec(fullname, path, target)
+                if spec is not None:
+                    cls.seen[fullname] = ', '.join(sorted(dists))
+                return spec
         return super().find_spec(fullname, path, target)
 
     @classmethod
-    def install(cls, allowed: set[str]) -> None:
+    def install(cls, allowed: set[str], hide: set[str] = frozenset()) -> None:
         """Replace the path finder with this one and unload the runner's own undeclared imports."""
-        cls.allowed = allowed
+        cls.allowed, cls.hide = allowed, set(hide)
         cls.providers = importlib.metadata.packages_distributions()
         sys.meta_path[sys.meta_path.index(importlib.machinery.PathFinder)] = cls
         if 'packaging' not in allowed:
@@ -150,13 +160,33 @@ class Tee:
         return getattr(self.stream, name)
 
 
+def report_undeclared() -> None:
+    """Print the undeclared modules this run looked up."""
+    print(f'{UNDECLARED} {json.dumps(Guard.seen)}', file=sys.stderr)
+
+
+def baseline(deps: list[str]) -> int:
+    """Import every top-level module of the declared ``deps`` and report what else they look up."""
+    Guard.install(closure(deps))
+    names = {canonicalize_name(Requirement(dep).name) for dep in deps}
+    for module, dists in sorted(Guard.providers.items()):
+        if names & {canonicalize_name(d) for d in dists}:
+            with contextlib.suppress(BaseException):
+                __import__(module)
+    report_undeclared()
+    return 0
+
+
 def main() -> int:
     """Run the script given on the command line and write each statement's stdout."""
+    if sys.argv[1] == '--baseline':
+        return baseline(sys.argv[2:])
     script, output = Path(sys.argv[1]).resolve(), Path(sys.argv[2])
+    hide = set(sys.argv[4].split(',')) if sys.argv[3:4] == ['--hide'] else set()
     source = script.read_text(encoding='utf-8')
     deps = declared_dependencies(source)
     if deps is not None:
-        Guard.install(closure(deps))
+        Guard.install(closure(deps), hide)
     sys.argv = [str(script)]
     sys.path[0] = str(script.parent)
     namespace = {'__name__': '__main__', '__file__': str(script), '__builtins__': __builtins__}
@@ -180,6 +210,8 @@ def main() -> int:
     finally:
         sys.stdout = tee.stream
         output.write_text(json.dumps(records))
+        if deps is not None:
+            report_undeclared()
     return code
 
 

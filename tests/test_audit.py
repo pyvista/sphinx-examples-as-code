@@ -9,6 +9,7 @@ import importlib.util
 import json
 from pathlib import Path
 import runpy
+import subprocess
 import sys
 import textwrap
 
@@ -19,6 +20,7 @@ from sphinx_examples_as_code import _audit_runner as runner
 from sphinx_examples_as_code import audit
 
 HEADER = '# /// script\n# dependencies = [\n#     "packaging",\n# ]\n# ///\n'
+TRY_PYTEST = 'try:\n    import pytest\nexcept ImportError:\n'
 
 
 def _notebook(*cells: str) -> str:
@@ -95,6 +97,10 @@ def site(tmp_path: Path) -> Path:
         'd/hint.py': HEADER
         + 'import importlib.util\nif not importlib.util.find_spec("pytest"):\n'
         + '    raise ImportError("pip install pytest")\n',
+        'd/swallowed.py': HEADER
+        + TRY_PYTEST
+        + '    pytest = None\nif pytest is None:\n    raise ValueError("no backend")\n',
+        'd/optional.py': HEADER + TRY_PYTEST + '    pass\n',
         'd/fails.py': 'raise ValueError("boom")\n',
         'd/fails.ipynb': _notebook('raise ValueError("boom")'),
         'e/writes.ipynb': _notebook('open("out.txt", "w").close()'),
@@ -165,6 +171,10 @@ def test_run_python(site: Path, tmp_path: Path):
     assert results['d/undeclared.py']['findings'][0]['message'] == "'pytest' from pytest"
     assert results['d/probe.py']['findings'] == []
     assert _kinds(results['d/hint.py']) == ['dependency']
+    assert results['d/swallowed.py']['findings'] == [
+        {'kind': 'dependency', 'message': "'pytest' from pytest"}
+    ]
+    assert results['d/optional.py']['findings'] == []
     assert _kinds(results['d/fails.py']) == ['error']
 
     output = tmp_path / 'excluded.jsonl'
@@ -172,7 +182,7 @@ def test_run_python(site: Path, tmp_path: Path):
     args = ['run', downloads, '--format', 'python', '--output', str(output)]
     audit.main([*args, '--exclude', 'fail*', '?ndeclared'])
     names = {json.loads(line)['name'] for line in output.read_text().splitlines()}
-    assert names == {'good', 'dropped', 'prompt', 'probe', 'hint'}
+    assert names == {'good', 'dropped', 'prompt', 'probe', 'hint', 'swallowed', 'optional'}
 
 
 @pytest.mark.skipif(importlib.util.find_spec('nbconvert') is None, reason='needs nbconvert')
@@ -530,26 +540,84 @@ def test_runner_hides_its_own_imports(tmp_path: Path):
     assert [f['kind'] for f in findings] == ['dependency']
 
 
-def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+@pytest.mark.parametrize('hide', [False, True])
+def test_runner_in_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, hide: bool):
     script = tmp_path / 's.py'
     script.write_text(HEADER + 'print("a")\nx = 1\nimport seac_local\nprint(x)\nimport pytest\n')
     (tmp_path / 'seac_local.py').write_text('')
     output = tmp_path / 'out.json'
-    monkeypatch.setattr(sys, 'argv', ['runner', str(script), str(output)])
+    argv = ['runner', str(script), str(output), *(['--hide', 'pytest'] if hide else [])]
+    monkeypatch.setattr(sys, 'argv', argv)
     monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
     monkeypatch.setattr(sys, 'path', list(sys.path))
     monkeypatch.delitem(sys.modules, 'pytest')
-    monkeypatch.setattr(runner.Guard, 'allowed', set())
-    monkeypatch.setattr(runner.Guard, 'providers', {})
-    monkeypatch.setattr(runner.Guard, 'hidden', {})
-    assert runner.main() == 1
-    assert json.loads(output.read_text()) == [
-        {'line': 6, 'stdout': 'a\n'},
-        {'line': 7, 'stdout': ''},
-        {'line': 8, 'stdout': ''},
-        {'line': 9, 'stdout': '1\n'},
-    ]
-    assert f"{runner.BLOCKED} of 'pytest' from pytest" in capsys.readouterr().err
+    for name in ('allowed', 'hide'):
+        monkeypatch.setattr(runner.Guard, name, set())
+    for name in ('providers', 'hidden', 'seen'):
+        monkeypatch.setattr(runner.Guard, name, {})
+    assert runner.main() == int(hide)
+    records = [{'line': 6, 'stdout': 'a\n'}, {'line': 7, 'stdout': ''}, {'line': 8, 'stdout': ''}]
+    records.append({'line': 9, 'stdout': '1\n'})
+    assert json.loads(output.read_text())[:4] == records
+    err = capsys.readouterr().err
+    assert (f"{runner.BLOCKED} of 'pytest' from pytest" in err) is hide
+    assert audit.undeclared(err)[1] == ({} if hide else {'pytest': 'pytest'})
+
+
+def test_runner_baseline(monkeypatch: pytest.MonkeyPatch, capsys):
+    monkeypatch.setattr(sys, 'argv', ['runner', '--baseline', 'seac-fake', 'packaging'])
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    monkeypatch.delitem(sys.modules, 'pytest')
+    monkeypatch.setattr(runner.Guard, 'seen', {})
+    providers = {'pytest': ['pytest'], 'seac_fake_mod': ['seac-fake'], 'seac_broken': ['seac-fake']}
+    monkeypatch.setattr(runner.importlib.metadata, 'packages_distributions', lambda: providers)
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == 'seac_fake_mod':
+            return real_import('pytest')
+        if name == 'seac_broken':
+            raise RuntimeError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr('builtins.__import__', fake_import)
+    assert runner.main() == 0
+    assert audit.undeclared(capsys.readouterr().err)[1] == {'pytest': 'pytest'}
+
+
+class _Everything:
+    """Contain every module name."""
+
+    def __contains__(self, name: object) -> bool:
+        """Return True."""
+        return True
+
+
+def test_baseline_suspects_are_not_rerun(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / 's.py'
+    path.write_text(HEADER + TRY_PYTEST + '    raise ValueError\n')
+    monkeypatch.setattr(audit, 'baseline', lambda deps, timeout: _Everything())
+    assert audit.execute(path, 'python', 60, [])['findings'] == []
+
+
+def test_baseline_and_rerun_time_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 1)
+
+    monkeypatch.setattr(audit.subprocess, 'run', timeout)
+    assert audit.baseline.__wrapped__(('packaging',), 1) == frozenset()
+    path = tmp_path / 's.py'
+    path.write_text(HEADER)
+    monkeypatch.setattr(audit, 'baseline', lambda deps, timeout: frozenset())
+    seen = {'pytest': 'pytest'}
+    finding = audit.dependency_finding(path, [], seen, passed=True, tmp=str(tmp_path), timeout=1)
+    assert finding is None
+
+
+def test_failing_script_keeps_its_error(tmp_path: Path):
+    path = tmp_path / 's.py'
+    path.write_text(HEADER + TRY_PYTEST + '    pass\nraise ValueError("boom")\n')
+    assert _kinds(audit.execute(path, 'python', 60, [])) == ['error']
 
 
 def test_runner_records_writelines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
@@ -613,3 +681,10 @@ def test_guard_unloads_packaging(monkeypatch: pytest.MonkeyPatch):
     runner.Guard.install(set())
     assert 'packaging.version' not in sys.modules
     assert runner.Guard.find_spec('json') is not None
+
+
+def test_guard_skips_modules_it_cannot_find(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(runner.Guard, 'providers', {'seac_missing': ['seac-missing']})
+    monkeypatch.setattr(runner.Guard, 'seen', {})
+    assert runner.Guard.find_spec('seac_missing') is None
+    assert runner.Guard.seen == {}
