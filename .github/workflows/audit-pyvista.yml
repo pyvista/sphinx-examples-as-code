@@ -1,6 +1,6 @@
 name: Audit PyVista downloads
 
-# Builds PyVista's main docs with this commit, runs every example download and files an issue on failure.
+# Builds PyVista's docs with this commit, runs every example download and files an issue on failure.
 on:
   workflow_dispatch:
   schedule:
@@ -33,7 +33,7 @@ jobs:
     with:
       repository: pyvista/pyvista
       artifact: docs-build-audit
-      formats: '["python", "jupyter"]'  # marimo once PyVista's docs ship marimo downloads
+      formats: '["python", "jupyter", "marimo"]'
       runs-on: ubuntu-22.04
       headless-display: true
       cache-path: pyvista-data
