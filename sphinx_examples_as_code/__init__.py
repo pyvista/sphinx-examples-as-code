@@ -31,6 +31,7 @@ from packaging.version import InvalidVersion
 from packaging.version import Version
 from sphinx import addnodes
 from sphinx.errors import ConfigError
+from sphinx.transforms.post_transforms import SphinxPostTransform
 from sphinx.util import logging
 
 from ._version import __version__
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
     from sphinx.application import Sphinx
     from sphinx.config import Config
@@ -354,7 +356,69 @@ def _convert_doctest_block(
     node: nodes.doctest_block, *, print_output: bool = False
 ) -> list[Segment]:
     """Convert a doctest block; see ``_convert_doctest_source``."""
-    return _convert_doctest_source(node.astext(), print_output=print_output)
+    return _convert_doctest_source(_doctest_source(node), print_output=print_output)
+
+
+#: Node attribute holding a doctest's source before Sphinx trims its ``# doctest:`` flags.
+_DOCTEST_SOURCE_ATTR = 'sphinx_examples_as_code_source'
+
+_DOCTEST_FLAGS = re.compile(r'\s*#\s*doctest:\s*([^\n\'"]*)$')
+
+
+def _doctest_source(node: nodes.Element) -> str:
+    """Return a doctest node's text with its ``# doctest:`` flags, when they were kept."""
+    return node.get(_DOCTEST_SOURCE_ATTR, node.astext())
+
+
+class _KeepDoctestFlags(SphinxPostTransform):
+    """Keep each doctest's source before ``TrimDoctestFlagsTransform`` removes its flags."""
+
+    default_priority = 399
+
+    def run(self, **kwargs: Any) -> None:
+        """Copy the untrimmed source of doctest and ``>>>`` blocks to a node attribute."""
+        for node in self.document.findall(nodes.literal_block):
+            if node.rawsource == node.astext() and node.rawsource.lstrip().startswith('>>>'):
+                node[_DOCTEST_SOURCE_ATTR] = node.rawsource
+        for node in self.document.findall(nodes.doctest_block):
+            if node.rawsource:
+                node[_DOCTEST_SOURCE_ATTR] = node.rawsource
+
+
+def _doctest_rows(source: str) -> list[tuple[str, str, bool]]:
+    """Classify doctest lines as ``(kind, code, skipped)``, each example at its own indent."""
+    rows: list[list] = []
+    indent = 0
+    for line in source.splitlines():
+        stripped = line.lstrip()
+        rest = line[indent:]
+        if stripped.startswith('>>> ') or stripped == '>>>':
+            indent = len(line) - len(stripped)
+            rows.append(['prompt', stripped[4:], False])
+        elif (
+            rows
+            and rows[-1][0] in ('prompt', 'continuation')
+            and not line[:indent].strip()
+            and (rest.startswith('... ') or rest == '...')
+        ):
+            rows.append(['continuation', rest[4:], False])
+        elif not stripped:
+            rows.append(['blank', '', False])
+        else:
+            rows.append(['output', line, False])
+    start = 0
+    for i, row in enumerate([*rows, ['prompt', '', False]]):
+        if row[0] != 'prompt':
+            continue
+        example = [r for r in rows[start:i] if r[0] in ('prompt', 'continuation')]
+        flags = [m[1] for r in example if (m := _DOCTEST_FLAGS.search(r[1]))]
+        tokens = [t for f in flags for t in re.split(r'[\s,]+', f) if t in ('+SKIP', '-SKIP')]
+        skipped = tokens[-1:] == ['+SKIP']
+        for r in example:
+            r[1] = _DOCTEST_FLAGS.sub('', r[1])
+            r[2] = skipped
+        start = i
+    return [tuple(row) for row in rows]
 
 
 def _print_last_expression(lines: list[str]) -> list[str]:
@@ -395,14 +459,16 @@ def _convert_doctest_source(source: str, *, print_output: bool = False) -> list[
     Non-prompted, non-blank lines are doctest *output* -- dropped entirely,
     not kept as comments. With ``print_output``, an expression with output is
     wrapped in ``print(repr())``. A statement with output is followed by a ``break``
-    segment, or by ``end`` if it is the last.
+    segment, or by ``end`` if it is the last. An example flagged ``+SKIP`` becomes
+    comments and its output is dropped.
     """
     segments: list[Segment] = []
     lines: list[str] = []
     has_output = False
     statement_start = 0
-    for line in source.splitlines():
-        if line.startswith('>>> ') or line == '>>>':
+    skipped = False
+    for kind, code, skip in _doctest_rows(source):
+        if kind == 'prompt':
             if has_output and lines:
                 blanks: list[str] = []
                 while lines and not lines[-1].strip():
@@ -410,13 +476,13 @@ def _convert_doctest_source(source: str, *, print_output: bool = False) -> list[
                 segments += [('code', lines), ('break', blanks)]
                 lines = []
             has_output = False
+            skipped = skip
             statement_start = len(lines)
-            lines.append(_clean_code_comment(line[4:]))
-        elif line.startswith('... ') or line == '...':
-            lines.append(_clean_code_comment(line[4:]))
-        elif not line.strip():
+        if kind in ('prompt', 'continuation'):
+            lines.append(f'# {code}'.rstrip() if skip else _clean_code_comment(code))
+        elif kind == 'blank':
             lines.append('')
-        else:
+        elif not skipped:
             # doctest output line - dropped
             if print_output and not has_output:
                 lines[statement_start:] = _print_last_expression(lines[statement_start:])
@@ -454,7 +520,8 @@ def _convert_literal_block(node: nodes.Element, *, print_output: bool = False) -
     if _is_gallery_code_block(node):
         language, source = node.get('lang', ''), _gallery_code_block_source(node)
     else:
-        language, source = node.get('language', ''), node.astext()
+        language = node.get('language', '')
+        source = _doctest_source(node) if language.lower() in _PYTHON_LANGUAGES else node.astext()
     # Case-insensitive: sphinx-gallery emits ``.. code-block:: Python`` (capitalized).
     if language.lower() in _PYTHON_LANGUAGES:
         if source.lstrip().startswith('>>>'):
@@ -1935,6 +2002,7 @@ def _disable_gallery_notebooks(_app: Sphinx, config: Config) -> None:
 def setup(app: Sphinx) -> dict:  # numpydoc ignore=RT01
     """Register the extension."""
     app.connect('doctree-resolved', _process_doctree)
+    app.add_post_transform(_KeepDoctestFlags)
     app.connect('config-inited', _finalize_conf)
     # sphinx-gallery fills its own defaults at priority 10.
     app.connect('config-inited', _disable_gallery_notebooks, priority=5)

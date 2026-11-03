@@ -459,6 +459,21 @@ def case_see_also_underline_heading():
     """
 
 
+def case_doctest_skip():
+    """Docstring whose example skips a statement that cannot run.
+
+    Examples
+    --------
+    >>> import sys
+    >>> sys.exit(
+    ...     1
+    ... )  # doctest: +SKIP
+    >>> sys.maxsize > 0  # doctest: +ELLIPSIS
+    True
+
+    """
+
+
 class Sample:
     """A sample class used as a cross-reference target above."""
 

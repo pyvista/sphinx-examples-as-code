@@ -38,7 +38,9 @@ jobs:
       headless-display: true
       cache-path: pyvista-data
       cache-key: ${{ needs.cache-pyvista-data.outputs.key }}
-      setup: echo "PYVISTA_DATA=$GITHUB_WORKSPACE/pyvista-data" >> "$GITHUB_ENV"
+      setup: |  # the docs build's theme
+        echo "PYVISTA_DATA=$GITHUB_WORKSPACE/pyvista-data" >> "$GITHUB_ENV"
+        echo "PYVISTA_PLOT_THEME=document_build" >> "$GITHUB_ENV"
       install: uv pip install . --group docs
       exclude: '*delete_downloads*'
       issue-label: docs-download-failure

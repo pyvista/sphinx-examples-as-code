@@ -389,6 +389,66 @@ def test_convert_doctest_source_empty_last_prompt(source: str):
     assert seac._join_segments([*segments, ('code', ['b'])]) == ['a', '', 'b']
 
 
+def test_convert_doctest_source_skip_becomes_comments():
+    source = '>>> a = 1\n>>> f(\n...     a,\n... )  # doctest: +SKIP\nout\n'
+    source += '>>> b = 2  # doctest: +ELLIPSIS'
+    segments = seac._convert_doctest_source(source, print_output=True)
+    assert segments == [('code', ['a = 1', '# f(', '#     a,', '# )', 'b = 2'])]
+
+
+@pytest.mark.parametrize('flags', ['+SKIP', '+ELLIPSIS, +SKIP', '+NORMALIZE_WHITESPACE +SKIP'])
+def test_convert_doctest_source_skip_among_flags(flags: str):
+    segments = seac._convert_doctest_source(f'>>> f()  # doctest: {flags}')
+    assert segments == [('code', ['# f()'])]
+
+
+@pytest.mark.parametrize(
+    'line',
+    ['>>> f()  # doctest: -SKIP', '>>> f()  # doctest: +SKIP -SKIP', '>>> s = "# doctest: +SKIP"'],
+)
+def test_convert_doctest_source_not_skipped(line: str):
+    code = line.removeprefix('>>> ').split('  # doctest')[0]
+    assert seac._convert_doctest_source(line) == [('code', [code])]
+
+
+def test_convert_doctest_source_skip_only_its_example():
+    segments = seac._convert_doctest_source('>>> f()  # doctest: +SKIP\n>>> g()\n1')
+    assert segments == [('code', ['# f()', 'g()']), ('end', [])]
+
+
+def test_convert_doctest_source_indented_prompt():
+    source = '>>> a = 1\n        >>> b = f(\n        ...     a\n        ... )\n>>> b'
+    segments = seac._convert_doctest_source(source)
+    assert segments == [('code', ['a = 1', 'b = f(', '    a', ')', 'b'])]
+
+
+def test_convert_doctest_source_ellipsis_output_after_output():
+    segments = seac._convert_doctest_source('>>> x\n[1,\n...\n2]')
+    assert segments == [('code', ['x']), ('end', [])]
+
+
+def test_keep_doctest_flags_reads_untrimmed_source():
+    doctest_node = nodes.doctest_block('>>> f()  # doctest: +SKIP', '>>> f()')
+    console = nodes.literal_block('>>> g()  # doctest: +SKIP', '>>> g()  # doctest: +SKIP')
+    code = nodes.literal_block('h()', 'h()')
+    document = publish_doctree('')
+    document += [doctest_node, console, code]
+    empty = nodes.doctest_block('', '>>> e()')
+    document += empty
+    seac._KeepDoctestFlags(document).run()
+    console[:] = [nodes.Text('>>> g()')]
+    assert seac._DOCTEST_SOURCE_ATTR not in empty
+    assert seac._convert_doctest_block(doctest_node) == [('code', ['# f()'])]
+    assert seac._doctest_source(console) == '>>> g()  # doctest: +SKIP'
+    assert seac._DOCTEST_SOURCE_ATTR not in code
+
+
+def test_non_python_block_keeps_trimmed_text():
+    node = nodes.literal_block('>>> f()  # doctest: +SKIP', '>>> f()', language='pycon')
+    node[seac._DOCTEST_SOURCE_ATTR] = node.rawsource
+    assert seac._convert_literal_block(node) == [('directive', ['# >>> f()'])]
+
+
 def test_convert_doctest_blocks_split_after_output():
     doctree = _parse('>>> a = 1\n>>> a\n1\n\n>>> b = 2\n>>> b\n2\n')
     segments = [seg for block in doctree for seg in seac._convert_doctest_block(block)]

@@ -161,7 +161,8 @@ What happens to the content of an Examples section:
   expression that has output is wrapped in `print(repr())`, so running the script
   prints what the doctest shows. A call that prints its own output and returns `None`
   also prints `None`. In notebooks, a statement that has
-  output ends its code cell.
+  output ends its code cell. An example flagged `# doctest: +SKIP` becomes comments,
+  other `# doctest:` flags are removed, and each example may sit at its own indent.
 - `.. code-block:: python` (or `py`) blocks are kept as-is, unless they start with `>>>`,
   which converts them like a doctest block; other languages become
   comments, set off with blank lines on both sides like any other directive.
@@ -277,7 +278,7 @@ With `--html`, only downloads a page links to are run. Each finding has a kind:
 | `syntax` | Code that is not valid Python, such as a doctest prompt or a `%` line |
 | `magic` | A line the marimo converter turned into an IPython magic |
 | `marimo-check` | `marimo check` fails, e.g. a name defined in two cells |
-| `dependency` | A script fails importing a module its `dependencies` do not install |
+| `dependency` | A script fails without a module its `dependencies` do not install |
 | `requires-python` | A download's `requires-python` excludes the Python running the audit |
 | `collapsed` | A doctest value is not the last statement of its notebook cell, so it is not shown |
 | `dropped-output` | A script does not print a doctest value |
@@ -290,9 +291,11 @@ With `--html`, only downloads a page links to are run. Each finding has a kind:
 | `missing-download` | A link group or gallery page lacks a format other pages have |
 | `no-downloads` | No download of the format exists at all |
 
-- Scripts run one top-level statement at a time. An import of a module that only
-  distributions outside the `dependencies` of the script's inline metadata provide fails,
-  as it would in the environment `uv run` builds.
+- Scripts run one top-level statement at a time. When a script looks up a module that
+  only distributions outside the `dependencies` of its inline metadata provide, either
+  itself or through a library where importing those dependencies alone does not, the script
+  runs again with that module hidden, as in the environment `uv run` builds, and fails the
+  check if it then fails. Notebooks are not checked for dependencies.
 - Downloads run in the current environment and user account. Pass `--exclude` with glob
   patterns of example names to skip any that delete or overwrite files, e.g. a cache.
 - Expected outputs come from the doctest blocks of each download's example, compared with
