@@ -448,6 +448,36 @@ def test_expectations_skip_blocks_before_any_link(tmp_path: Path):
     assert audit.expectations(tmp_path) == {'a/x.py': ('p.html#0', [audit.Expected('2\n', '2\n')])}
 
 
+def test_expectations_restore_blanklines(tmp_path: Path):
+    page = _page({'a/x.py': '>>> x\na\n\nb\n>>> y\n1\n\n>>> z\n2\n\n'})
+    (tmp_path / 'p.html').write_text(page)
+    [_, examples] = audit.expectations(tmp_path)['a/x.py']
+    assert [ex.want for ex in examples] == ['a\n<BLANKLINE>\nb\n', '1\n', '2\n']
+    assert audit.same_output(examples[0].want, 'a\n\nb\n')
+    script = 'def f():\n    """\n    >>> f()\n    1\n\n    """\n\n\nx = 1\n'
+    assert audit.restore_blanklines(script) == script
+
+
+def test_commented_statements():
+    source = '# Some prose.\n# f(\n#     a,\n# )\nx = 1\n# %%\n#\n'
+    [node] = audit.commented_statements(source)
+    assert ast.unparse(node) == 'f(a)'
+    assert node.lineno == 2
+    assert audit.is_skipped(node)
+    assert [audit.is_skipped(n) for n in audit.with_skipped(source)] == [True, False]
+    assert audit.with_skipped('x +') is None
+
+
+def test_skipped_statements_are_not_compared(tmp_path: Path):
+    expected = [audit.Expected('x\n', '1\n'), audit.Expected('x\n', '2\n')]
+    script = tmp_path / 'x.py'
+    script.write_text('x = 2\n# x\nprint(repr((x)))\n')
+    units = audit.python_units(script, [{'line': 3, 'stdout': '2\n'}])
+    assert audit.compare(expected, units, 'python') == ([], 1)
+    units = [(audit.with_skipped('x = 2\n# x'), ''), (audit.with_skipped('x\n# y'), '2\n')]
+    assert audit.compare(expected, units, 'jupyter') == ([], 1)
+
+
 def test_page_groups_bottom_links():
     block = '<div class="highlight-pycon"><div class="highlight"><pre>&gt;&gt;&gt; {0}\n{0}\n</pre>'
     link = '<p><a class="reference download internal" href="../_downloads/{0}">x</a></p>'

@@ -54,6 +54,7 @@ CODE_BLOCK = re.compile(
     r'<div class="[^"]*highlight-[\w-]+[^"]*"><div class="highlight"><pre>(.*?)</pre>', re.DOTALL
 )
 TAG = re.compile(r'<[^>]+>')
+PROMPT = re.compile(r'^(\s*)>>>(?: |$)')
 NUMBER = re.compile(r'[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?')
 # marimo's converter renames a redefinition ``x`` to ``x_1`` and a cell-local ``x`` to ``_x``.
 MARIMO_NAME = re.compile(r'^_?(.+?)(?:_\d+)?$')
@@ -139,6 +140,23 @@ def page_groups(text: str, position: str = 'top') -> list[tuple[list[str], list[
     return groups
 
 
+def restore_blanklines(block: str) -> str:
+    """Return a rendered doctest block with ``<BLANKLINE>`` back where Sphinx shows a blank line."""
+    if not block.lstrip().startswith('>>>'):
+        # Sphinx trims ``<BLANKLINE>`` only in blocks that start with a prompt.
+        return block
+    lines = block.split('\n')
+    indent = None
+    for i, line in enumerate(lines):
+        if match := PROMPT.match(line):
+            indent = match[1]
+        elif indent is not None and not line.strip():
+            following = next((rest for rest in lines[i + 1 :] if rest.strip()), None)
+            if following is not None and not PROMPT.match(following):
+                lines[i] = f'{indent}<BLANKLINE>'
+    return '\n'.join(lines)
+
+
 def expectations(html_dir: Path, position: str = 'top') -> dict[str, tuple[str, list[Expected]]]:
     """Map each download to its link group and the doctest statements with output it shows."""
     parser = doctest.DocTestParser()
@@ -151,7 +169,7 @@ def expectations(html_dir: Path, position: str = 'top') -> dict[str, tuple[str, 
                 Expected(ex.source, ex.want)
                 for block in blocks
                 if '>>> ' in block
-                for ex in parser.get_examples(block)
+                for ex in parser.get_examples(restore_blanklines(block))
                 if ex.want.strip()
             ]
             for link in links:
@@ -173,6 +191,51 @@ def statements(source: str) -> list[ast.stmt] | None:
         return ast.parse(source).body
     except SyntaxError:
         return None
+
+
+def commented_statements(source: str) -> list[ast.stmt]:
+    """Return the statements in runs of ``# `` lines, the way a download keeps a skipped doctest."""
+    lines = source.splitlines()
+    found: list[ast.stmt] = []
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith('#'):
+            i += 1
+            continue
+        end = i
+        while end < len(lines) and lines[end].startswith('#'):
+            end += 1
+        run = [line[2:] if line.startswith('# ') else line[1:] for line in lines[i:end]]
+        start = 0
+        while start < len(run):
+            stop, body = next(
+                (
+                    (stop, body)
+                    for stop in range(len(run), start, -1)
+                    if (body := statements('\n'.join(run[start:stop])))
+                ),
+                (start + 1, []),
+            )
+            for node in body:
+                ast.increment_lineno(node, i + start)
+                node.skipped = True
+            found += body
+            start = stop
+        i = end
+    return found
+
+
+def with_skipped(source: str) -> list[ast.stmt] | None:
+    """Return the statements of ``source`` with its commented-out ones, in line order."""
+    body = statements(source)
+    if body is None:
+        return None
+    return sorted(body + commented_statements(source), key=lambda node: node.lineno)
+
+
+def is_skipped(node: ast.stmt) -> bool:
+    """Check whether a statement is commented out in the download."""
+    return getattr(node, 'skipped', False)
 
 
 class _Unrename(ast.NodeTransformer):
@@ -322,7 +385,19 @@ def compare(
         # One cell holding the whole script, with each statement's stdout.
         outputs = [out for _, out in units]
         units = [([node for body, _ in units for node in body], None)]
-    cells = [[dump(node, unrename=unrename) for node in body] for body, _ in units]
+    cells = [
+        [
+            dump(printed(node) if fmt == 'python' and is_skipped(node) else node, unrename=unrename)
+            for node in body
+        ]
+        for body, _ in units
+    ]
+    skipped = {
+        (u, i)
+        for u, (body, _) in enumerate(units)
+        for i, node in enumerate(body)
+        if is_skipped(node)
+    }
     used: set[tuple[int, int]] = set()
     for ex in expected:
         body = statements(ex.source)
@@ -337,11 +412,13 @@ def compare(
                 findings.append({'kind': 'dropped-output', 'message': line})
             continue
         used.add(hit)
+        if hit in skipped:
+            continue
         u, i = hit
         if fmt == 'python':
             ran = outputs[i : i + len(target)]
             got = None if None in ran else ''.join(ran)
-        elif i + len(target) < len(cells[u]):
+        elif any((u, j) not in skipped for j in range(i + len(target), len(cells[u]))):
             if is_value(body[-1]):
                 findings.append({'kind': 'collapsed', 'message': line})
             continue
@@ -360,7 +437,7 @@ def compare(
 def python_units(path: Path, records: list[dict]) -> list[tuple[list[ast.stmt], str | None]]:
     """Return each top-level statement of a script with the stdout the runner recorded."""
     stdout = {r['line']: r['stdout'] for r in records}
-    body = statements(path.read_text(encoding='utf-8')) or []
+    body = with_skipped(path.read_text(encoding='utf-8')) or []
     return [([node], stdout.get(node.lineno)) for node in body]
 
 
@@ -373,7 +450,7 @@ def notebook_units(path: Path) -> list[tuple[list[ast.stmt], str | None]]:
     return [
         (body, output_text(cell.get('outputs', [])))
         for cell in code
-        if (body := statements(''.join(cell['source'])))
+        if (body := with_skipped(''.join(cell['source'])))
     ]
 
 
