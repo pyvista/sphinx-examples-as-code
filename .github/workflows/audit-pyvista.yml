@@ -1,6 +1,6 @@
 name: Audit PyVista downloads
 
-# Builds PyVista's main docs with this commit, runs every example download and files an issue on failure.
+# Builds PyVista's docs with this commit, runs every example download and files an issue on failure.
 on:
   workflow_dispatch:
   schedule:
@@ -32,8 +32,9 @@ jobs:
       issues: write  # to file the report
     with:
       repository: pyvista/pyvista
+      ref: feat/marimo-notebook-detection  # pyvista/pyvista#9479, whose docs ship marimo downloads
       artifact: docs-build-audit
-      formats: '["python", "jupyter"]'  # marimo once PyVista's docs ship marimo downloads
+      formats: '["python", "jupyter", "marimo"]'
       runs-on: ubuntu-22.04
       headless-display: true
       cache-path: pyvista-data

@@ -11,7 +11,8 @@ on:
       install:
         description: >-
           Shell command installing the documentation environment. Runs in a checkout of the docs
-          repository: the calling workflow's ref when `repository` is empty, else its default branch.
+          repository at `ref`, else the calling workflow's ref when `repository` is empty, else its
+          default branch.
           The audit itself is then installed from this workflow's commit.
         required: true
         type: string
@@ -19,6 +20,10 @@ on:
         description: >-
           The public `owner/repo` that builds the docs, read with the workflow token; empty for the
           calling repository.
+        type: string
+        default: ''
+      ref:
+        description: Branch, tag or commit of the docs repository to check out; empty for the default.
         type: string
         default: ''
       build:
@@ -154,6 +159,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       with:
         repository: ${{ inputs.repository || github.repository }}
+        ref: ${{ inputs.ref }}
         persist-credentials: false
 
     - name: Record the commit
@@ -227,6 +233,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
       with:
         repository: ${{ inputs.repository || github.repository }}
+        ref: ${{ inputs.ref }}
         persist-credentials: false
 
     - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7   # v10.2.0
