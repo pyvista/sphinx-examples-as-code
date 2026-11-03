@@ -14,6 +14,7 @@ import textwrap
 
 import pytest
 
+import sphinx_examples_as_code as seac
 from sphinx_examples_as_code import _audit_runner as runner
 from sphinx_examples_as_code import audit
 
@@ -476,6 +477,36 @@ def test_static_findings_ignore_valid_code(tmp_path: Path):
     path = tmp_path / 'ok.py'
     path.write_text('s = """\n>>> not code\n% not a magic\n"""\n')
     assert audit.static_findings(path, 'python') == []
+
+
+@pytest.mark.parametrize('fmt', ['python', 'marimo', 'jupyter'])
+def test_static_findings_requires_python(tmp_path: Path, fmt: str):
+    def download(spec: str) -> str:
+        if fmt == 'jupyter':
+            run_line = seac._jupyter_run_line(['numpy'], spec, 'x.ipynb')
+            cells = seac._segments_to_cells([('text', [f'# {run_line}']), ('code', ['x'])])
+            return json.dumps(seac._build_notebook(cells))
+        return seac._script_metadata_header([], spec, 'run')
+
+    path = tmp_path / 'x'
+    spec = f'>=3.8,<{sys.version_info.major}.{sys.version_info.minor}'
+    path.write_text(download(spec))
+    message = f'{spec} excludes Python {audit.PYTHON}'
+    assert audit.static_findings(path, fmt) == [{'kind': 'requires-python', 'message': message}]
+    path.write_text(download('>=3.8'))
+    assert audit.static_findings(path, fmt) == []
+
+
+@pytest.mark.parametrize(
+    ('fmt', 'text'),
+    [
+        ('python', 'x = 1\n'),
+        ('marimo', '# /// script\n# dependencies = []\n# ///\n'),
+        ('jupyter', _notebook('x')),
+    ],
+)
+def test_requires_python_absent(fmt: str, text: str):
+    assert audit.requires_python(text, fmt) is None
 
 
 def test_stem_and_format():

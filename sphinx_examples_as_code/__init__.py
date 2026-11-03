@@ -1274,6 +1274,8 @@ def _documented_project(project: str | None) -> _DocumentedProject | None:
 _UV_INSTALL_LINE = 'Install uv first: https://docs.astral.sh/uv/getting-started/installation/'
 
 _PYTHON_CLASSIFIER = re.compile(r'Programming Language :: Python :: 3\.(\d+)$')
+# The minor version of the Python building the docs, which has every dependency installed.
+_BUILD_PYTHON_MINOR = sys.version_info.minor
 
 
 @functools.cache
@@ -1288,8 +1290,8 @@ def _newest_python_minor(name: str) -> int | None:
 
 
 @functools.cache
-def _ships_compiled_wheel(name: str) -> bool:
-    """Check whether an installed distribution's wheel is tagged for a platform or ABI."""
+def _ships_version_specific_wheel(name: str) -> bool:
+    """Check whether an installed distribution's wheel is built for one Python version's ABI."""
     try:
         wheel = importlib.metadata.distribution(name).read_text('WHEEL') or ''
     except importlib.metadata.PackageNotFoundError:
@@ -1297,15 +1299,17 @@ def _ships_compiled_wheel(name: str) -> bool:
     tags = [
         line.partition(':')[2].strip() for line in wheel.splitlines() if line.startswith('Tag:')
     ]
-    return any(not tag.endswith('-none-any') for tag in tags)
+    return any(tag.split('-')[1] not in ('none', 'abi3') for tag in tags)
 
 
 def _python_upper_bound(deps: list[str], project: str | None = None) -> str | None:
-    """Return ``<3.N`` just above the newest Python ``project`` and every compiled dep name."""
+    """Return ``<3.N`` above the build Python and the newest Python every counted dep names."""
     names = [_canonical_name(dep) for dep in deps]
-    newest = [_newest_python_minor(n) for n in names if n == project or _ships_compiled_wheel(n)]
-    known = [minor for minor in newest if minor is not None]
-    return f'<3.{min(known) + 1}' if known else None
+    counted = [n for n in names if n == project or _ships_version_specific_wheel(n)]
+    if not counted:
+        return None
+    known = [minor for n in counted if (minor := _newest_python_minor(n)) is not None]
+    return f'<3.{max(_BUILD_PYTHON_MINOR, min(known, default=0)) + 1}'
 
 
 def _python_range(floor: str | None, cap: str | None) -> str | None:
