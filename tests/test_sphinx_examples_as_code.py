@@ -2315,9 +2315,40 @@ def test_process_doctree_processes_spans(tmp_path: Path, position: str, expected
     assert isinstance(doctree[expected_index][0], addnodes.download_reference)
 
 
+@pytest.mark.parametrize(
+    ('gallery_downloads', 'doctree_factory', 'source'),
+    [
+        (True, lambda: _build_gallery_doctree(), 'gallery'),
+        (False, lambda: _parse('.. rubric:: Examples\n\n>>> x = 1'), 'docstrings'),
+    ],
+)
+def test_process_doctree_exports_by_source(
+    tmp_path: Path, gallery_downloads: bool, doctree_factory, source: str
+):
+    app = Mock(outdir=str(tmp_path / 'html'), confdir=str(tmp_path / 'src'))
+    app.builder.download_support = True
+    app.config.sphinx_examples_as_code_conf = {
+        **seac._CONF_DEFAULTS,
+        'formats': ['python'],
+        'gallery_downloads': gallery_downloads,
+        'footer': None,
+        'export_dir': '../exported',
+        'export_sources': list(seac._SOURCE_ORDER),
+    }
+    seac._reset_exports(app)
+
+    seac._process_doctree(app, doctree_factory(), 'examples/plot_minimal')
+
+    exported = tmp_path / 'exported'
+    assert [p.relative_to(exported).parts[:3] for p in exported.rglob('*.py')] == [
+        (source, 'python', 'examples')
+    ]
+
+
 def test_setup_registers_connect_and_config():
     app = Mock()
     result = seac.setup(app)
+    app.connect.assert_any_call('builder-inited', seac._reset_exports)
     app.connect.assert_any_call('doctree-resolved', seac._process_doctree)
     app.connect.assert_any_call('config-inited', seac._finalize_conf)
     app.connect.assert_any_call('config-inited', seac._disable_gallery_notebooks, priority=5)
