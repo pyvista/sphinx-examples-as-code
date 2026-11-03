@@ -369,6 +369,13 @@ def test_stray_markup_in_doctest_comment_cleaned(built: tuple[Path, list[Path]])
     assert '`' not in xref_src
 
 
+def test_doctest_skip_becomes_comments(built: tuple[Path, list[Path]]):
+    src = _read(built[1], 'case_doctest_skip')
+    assert '# sys.exit(\n#     1\n# )\n' in src
+    assert 'print(repr(sys.maxsize > 0))' in src
+    assert 'doctest:' not in src
+
+
 def test_link_position_config(tmp_path: Path):
     """``sphinx_examples_as_code_conf['link_position']`` moves the link within its section.
 

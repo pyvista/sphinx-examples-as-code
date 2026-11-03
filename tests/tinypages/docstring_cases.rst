@@ -67,5 +67,7 @@ resolve to.
 
 .. autofunction:: docstring_cases.case_see_also_underline_heading
 
+.. autofunction:: docstring_cases.case_doctest_skip
+
 .. autoclass:: docstring_cases.Sample
    :members:

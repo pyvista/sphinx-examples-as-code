@@ -161,7 +161,8 @@ What happens to the content of an Examples section:
   expression that has output is wrapped in `print(repr())`, so running the script
   prints what the doctest shows. A call that prints its own output and returns `None`
   also prints `None`. In notebooks, a statement that has
-  output ends its code cell.
+  output ends its code cell. An example flagged `# doctest: +SKIP` becomes comments,
+  other `# doctest:` flags are removed, and each example may sit at its own indent.
 - `.. code-block:: python` (or `py`) blocks are kept as-is, unless they start with `>>>`,
   which converts them like a doctest block; other languages become
   comments, set off with blank lines on both sides like any other directive.
