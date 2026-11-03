@@ -55,6 +55,9 @@ CODE_BLOCK = re.compile(
 )
 TAG = re.compile(r'<[^>]+>')
 PROMPT = re.compile(r'^(\s*)>>>(?: |$)')
+# A prompt holding only a comment, which DocTestParser leaves out.
+COMMENT_PROMPT = re.compile(r'^\s*>>> (#.*?)\s*$')
+PARSER = doctest.DocTestParser()
 NUMBER = re.compile(r'[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?')
 # marimo's converter renames a redefinition ``x`` to ``x_1`` and a cell-local ``x`` to ``_x``.
 MARIMO_NAME = re.compile(r'^_?(.+?)(?:_\d+)?$')
@@ -93,7 +96,7 @@ KINDS = {
 
 @dataclass(frozen=True)
 class Expected:
-    """One doctest statement with output, as rendered on a page."""
+    """One doctest statement and its output, as rendered on a page."""
 
     source: str
     want: str
@@ -141,9 +144,8 @@ def page_groups(text: str, position: str = 'top') -> list[tuple[list[str], list[
 
 
 def restore_blanklines(block: str) -> str:
-    """Return a rendered doctest block with ``<BLANKLINE>`` back where Sphinx shows a blank line."""
+    """Return a block that starts with a prompt with ``<BLANKLINE>`` back in its output."""
     if not block.lstrip().startswith('>>>'):
-        # Sphinx trims ``<BLANKLINE>`` only in blocks that start with a prompt.
         return block
     lines = block.split('\n')
     indent = None
@@ -152,26 +154,35 @@ def restore_blanklines(block: str) -> str:
             indent = match[1]
         elif indent is not None and not line.strip():
             following = next((rest for rest in lines[i + 1 :] if rest.strip()), None)
-            if following is not None and not PROMPT.match(following):
+            if (
+                following is not None
+                and following.startswith(indent)
+                and not PROMPT.match(following)
+            ):
                 lines[i] = f'{indent}<BLANKLINE>'
     return '\n'.join(lines)
 
 
+def block_examples(block: str) -> list[Expected]:
+    """Return the doctest statements of a block in order, comment-only prompts included."""
+    block = restore_blanklines(block)
+    examples = [(ex.lineno, Expected(ex.source, ex.want)) for ex in PARSER.get_examples(block)]
+    examples += [
+        (lineno, Expected(f'{match[1]}\n', ''))
+        for lineno, line in enumerate(block.split('\n'))
+        if (match := COMMENT_PROMPT.match(line))
+    ]
+    return [ex for _, ex in sorted(examples, key=lambda item: item[0])]
+
+
 def expectations(html_dir: Path, position: str = 'top') -> dict[str, tuple[str, list[Expected]]]:
-    """Map each download to its link group and the doctest statements with output it shows."""
-    parser = doctest.DocTestParser()
+    """Map each download to its link group and the doctest statements it shows."""
     found: dict[str, tuple[str, list[Expected]]] = {}
     for page in sorted(html_dir.rglob('*.html')):
         rel = page.relative_to(html_dir).as_posix()
         text = page.read_text(errors='replace')
         for index, (links, blocks) in enumerate(page_groups(text, position)):
-            examples = [
-                Expected(ex.source, ex.want)
-                for block in blocks
-                if '>>> ' in block
-                for ex in parser.get_examples(restore_blanklines(block))
-                if ex.want.strip()
-            ]
+            examples = [ex for block in blocks if '>>> ' in block for ex in block_examples(block)]
             for link in links:
                 found.setdefault(link, (f'{rel}#{index}', examples))
     return found
@@ -195,7 +206,7 @@ def statements(source: str) -> list[ast.stmt] | None:
 
 def commented_statements(source: str) -> list[ast.stmt]:
     """Return the statements in runs of ``# `` lines, the way a download keeps a skipped doctest."""
-    lines = source.splitlines()
+    lines = source.split('\n')
     found: list[ast.stmt] = []
     i = 0
     while i < len(lines):
@@ -226,7 +237,7 @@ def commented_statements(source: str) -> list[ast.stmt]:
 
 
 def with_skipped(source: str) -> list[ast.stmt] | None:
-    """Return the statements of ``source`` with its commented-out ones, in line order."""
+    """Return the statements of ``source`` and its commented-out ones in line order, or None."""
     body = statements(source)
     if body is None:
         return None
@@ -398,21 +409,34 @@ def compare(
         for i, node in enumerate(body)
         if is_skipped(node)
     }
+    live = {(u, i) for u, cell in enumerate(cells) for i in range(len(cell))} - skipped
     used: set[tuple[int, int]] = set()
     for ex in expected:
         body = statements(ex.source)
         if not body:
+            # A doctest that is itself commented-out code takes its commented line in the download.
+            commented = commented_statements(ex.source)
+            target = [
+                dump(printed(n) if fmt == 'python' else n, unrename=unrename) for n in commented
+            ]
+            if commented and (hit := find(cells, target, used | live)):
+                used.add(hit)
             continue
         line = ex.source.strip().splitlines()[-1]
         target = [dump(printed(n) if fmt == 'python' else n, unrename=unrename) for n in body]
         hit = find(cells, target, used)
         if hit is None:
             bare = [dump(n) for n in body]
-            if fmt == 'python' and is_value(body[-1]) and find(cells, bare, used):
+            if (
+                fmt == 'python'
+                and ex.want.strip()
+                and is_value(body[-1])
+                and find(cells, bare, used)
+            ):
                 findings.append({'kind': 'dropped-output', 'message': line})
             continue
         used.add(hit)
-        if hit in skipped:
+        if hit in skipped or not ex.want.strip():
             continue
         u, i = hit
         if fmt == 'python':
@@ -659,7 +683,7 @@ def execute(path: Path, fmt: str, timeout: float, expected: list[Expected]) -> d
         'name': stem(path),
         'format': fmt,
         'findings': findings,
-        'expected': len(expected),
+        'expected': sum(1 for ex in expected if ex.want.strip()),
         'compared': compared,
         'seconds': round(time.monotonic() - start, 1),
     }
